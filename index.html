@@ -1,316 +1,176 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Auto Encrypted Redirect Generator (All-in-HTML)</title>
-<style>
-  html,body{height:100%;margin:0;font-family:Inter,Arial,sans-serif;background:#f6fbff;color:#0b1220}
-  .wrap{max-width:980px;margin:28px auto;padding:18px}
-  .card{background:#fff;border-radius:10px;padding:18px;box-shadow:0 6px 24px rgba(12,34,64,0.06);border:1px solid #e6eef6}
-  input[type="text"]{width:78%;padding:10px;border:1px solid #d0d7df;border-radius:8px}
-  button{padding:10px 14px;border-radius:8px;border:0;background:#0d6efd;color:#fff;cursor:pointer;margin-left:8px}
-  .sample{display:block;margin-top:12px;word-break:break-all;color:#0d6efd}
-  .muted{color:#6b7280;font-size:13px}
-  .danger{color:#b91c1c;font-weight:600}
-  #verify-screen{display:none;align-items:center;justify-content:center;height:70vh}
-  #verify-box{max-width:560px}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Redirect Generator</title>
+  <style>
+    html,body {
+      height:100%; margin:0; padding:0;
+      font-family:Arial,Helvetica,sans-serif;
+      background:#f8f9fa; color:#111;
+    }
+    .section {
+      border:1px solid #e0e0e0; padding:14px; border-radius:8px;
+      margin:18px auto; max-width:960px; background:#fff;
+    }
+    input[type="text"] {
+      width:72%; padding:8px; border:1px solid #ccc; border-radius:4px;
+    }
+    button {
+      padding:8px 12px; border-radius:6px; border:0;
+      background:#0366d6; color:#fff; cursor:pointer;
+    }
+    .sample { word-break:break-all; color:#0366d6; text-decoration:none; }
 
-<!-- Cloudflare Turnstile -->
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    /* Verify screen */
+    #verify-screen {
+      display:none;
+      align-items:center;
+      justify-content:center;
+      height:100vh;
+      background:#f8f9fa;
+    }
+    #verify-box {
+      background:#fff;
+      padding:40px 50px;
+      border-radius:12px;
+      box-shadow:0 4px 16px rgba(0,0,0,0.1);
+      text-align:center;
+    }
+    h2 { font-weight:500; margin-bottom:20px; }
+  </style>
 
-<script>
-/*
-  AUTO ALL-IN-HTML Redirect Generator + Verifier
+  <!-- Cloudflare Turnstile -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
-  Put your real values in CONFIG below. The file runs everything client-side.
-  WARNING: Embedding secrets client-side is insecure. You said the HTML is private; proceed if acceptable.
-*/
+  <script>
+    // ---------------- CONFIG ----------------
+    const CONFIG = {
+      PUBLIC_PATH: window.location.origin + window.location.pathname,
 
-const CONFIG = {
-  PUBLIC_PATH: window.location.origin + window.location.pathname, // where this file is hosted
+      // ----- CLOUD FLARE KEYS -----
+      TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',
+      TURNSTILE_SECRET:   '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4',
 
-  // ⬇️⬇️⬇️ ENTER ONLY YOUR CLOUDFLARE KEYS HERE ⬇️⬇️⬇️
-  TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',   // your Cloudflare Turnstile Site Key
-  TURNSTILE_SECRET:   '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4',     // your Cloudflare Turnstile Secret Key
-  // ⬆️⬆️⬆️ ENTER ONLY YOUR CLOUDFLARE KEYS ABOVE ⬆️⬆️⬆️
+      SECRET_KEY: null,   // AES password (auto-generated)
+      HMAC_KEY:   null,   // HMAC signing key (auto-generated)
 
-  // These will be auto-generated below:
-  SECRET_KEY: null,   // AES password (auto-generated)
-  HMAC_KEY:   null,   // HMAC signing key (auto-generated)
+      PBKDF2_SALT: 'static-salt-you-may-change',
+      PBKDF2_ITER: 120000,
+      MIN_HUMAN_DELAY_MS: 1500,
+      AUTO_OPEN_AFTER_GENERATE: true
+    };
 
-  PBKDF2_SALT: 'static-salt-you-may-change',
-  PBKDF2_ITER: 120000,
-  MIN_HUMAN_DELAY_MS: 1500,
-  AUTO_OPEN_AFTER_GENERATE: true
-};
-// ----------------- helpers -----------------
-const enc = new TextEncoder(), dec = new TextDecoder();
+    // ---------------- AUTO-GENERATE KEYS ----------------
+    (function autoGenerateKeys() {
+      const STORAGE_SECRET = 'gen_secret_key';
+      const STORAGE_HMAC   = 'gen_hmac_key';
 
-function toB64(ab){
-  const bytes = new Uint8Array(ab);
-  let s='';
-  for(let i=0;i<bytes.length;i++) s+=String.fromCharCode(bytes[i]);
-  return btoa(s);
-}
-function fromB64(b64){
-  const bin = atob(b64);
-  const a = new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i);
-  return a.buffer;
-}
-function randBytes(n){ const u = new Uint8Array(n); crypto.getRandomValues(u); return u; }
-function uuid(){ if(crypto.randomUUID) return crypto.randomUUID(); return 'id-'+Math.random().toString(36).slice(2,12); }
-
-// derive AES-GCM key from password (SECRET_KEY)
-async function deriveAesKey(password, salt=CONFIG.PBKDF2_SALT, iterations=CONFIG.PBKDF2_ITER){
-  const base = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
-  return crypto.subtle.deriveKey({name:'PBKDF2', salt: enc.encode(salt), iterations, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
-}
-async function deriveHmacKey(password){
-  return crypto.subtle.importKey('raw', enc.encode(password), {name:'HMAC', hash:'SHA-256'}, false, ['sign','verify']);
-}
-
-async function encryptObject(obj, password){
-  const key = await deriveAesKey(password);
-  const iv = randBytes(12);
-  const plain = enc.encode(JSON.stringify(obj));
-  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, plain);
-  return JSON.stringify({ iv: toB64(iv), data: toB64(ct) });
-}
-
-async function decryptObject(jsonStr, password){
-  const parsed = JSON.parse(jsonStr);
-  const iv = new Uint8Array(fromB64(parsed.iv));
-  const dataBuf = fromB64(parsed.data);
-  const key = await deriveAesKey(password);
-  const plain = await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, dataBuf);
-  return JSON.parse(dec.decode(plain));
-}
-
-async function hmacSign(obj, keyPass){
-  const key = await deriveHmacKey(keyPass);
-  const data = enc.encode(JSON.stringify(obj));
-  const sig = await crypto.subtle.sign('HMAC', key, data);
-  return toB64(sig);
-}
-async function hmacVerify(obj, sigB64, keyPass){
-  const key = await deriveHmacKey(keyPass);
-  const data = enc.encode(JSON.stringify(obj));
-  const sig = fromB64(sigB64);
-  return crypto.subtle.verify('HMAC', key, sig, data);
-}
-
-// ----------------- UI build -----------------
-document.addEventListener('DOMContentLoaded', () => {
-  document.body.innerHTML = `
-    <div class="wrap">
-      <div class="card" id="generator">
-        <h2>Encrypted Redirect Generator (All-in-HTML)</h2>
-        <div style="margin-top:10px">
-          <input id="targetInput" type="text" placeholder="Enter destination URL (https://example.com)" />
-          <button id="genBtn">Generate & Open</button>
-          <button id="genBtnNoOpen">Generate (no open)</button>
-        </div>
-        <div id="generated" class="sample muted"></div>
-        <div style="margin-top:12px" class="muted">
-          <div><strong>Note:</strong> this page keeps secrets client-side. Only use if you accept the risk.</div>
-        </div>
-      </div>
-
-      <div class="card" id="verify-screen" style="margin-top:18px; display:none">
-        <div id="verify-box">
-          <h2>Verification & Redirect</h2>
-          <div id="verifyInfo" class="muted">Waiting for verification...</div>
-          <div style="margin-top:12px" id="turnstileContainer">
-            <div class="cf-turnstile" data-sitekey="${CONFIG.TURNSTILE_SITE_KEY}" data-callback="onTurnstileSuccess" data-expired-callback="onTurnstileExpired"></div>
-          </div>
-          <div style="height:12px"></div>
-          <button id="continueBtn" disabled>Waiting for verification...</button>
-          <div id="destHint" class="muted" style="margin-top:10px"></div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  setupGenerator();
-});
-
-// ----------------- generator behavior -----------------
-function setupGenerator(){
-  const genBtn = document.getElementById('genBtn');
-  const genBtnNoOpen = document.getElementById('genBtnNoOpen');
-  const targetInput = document.getElementById('targetInput');
-  const generated = document.getElementById('generated');
-
-  async function createEncryptedLink(dest){
-    // payload is reusable: u=dest, r=random id, t=created
-    const payload = { u: dest, r: uuid(), t: Date.now() };
-    const sig = await hmacSign(payload, CONFIG.HMAC_KEY);
-    const envelope = { payload, sig };
-    const encStr = await encryptObject(envelope, CONFIG.SECRET_KEY);
-    // encode with btoa so safe in URL
-    const final = `${CONFIG.PUBLIC_PATH}?w=${encodeURIComponent(btoa(encStr))}`;
-    return { final, encStrB64: btoa(encStr) };
-  }
-
-  genBtn.addEventListener('click', async ()=>{
-    const dest = targetInput.value.trim();
-    if(!dest) return alert('Enter a destination URL.');
-    try{
-      const { final } = await createEncryptedLink(dest);
-      generated.innerHTML = `<div><strong>Encrypted link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
-      if(CONFIG.AUTO_OPEN_AFTER_GENERATE){
-        // open same page with w param (navigates the page to verify flow)
-        window.location.href = final;
+      function randBase64(lenBytes) {
+        const b = new Uint8Array(lenBytes);
+        crypto.getRandomValues(b);
+        let s = '';
+        for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+        return btoa(s);
       }
-    }catch(e){
-      console.error(e);
-      alert('Failed to generate encrypted link (see console).');
-    }
-  });
 
-  genBtnNoOpen.addEventListener('click', async ()=>{
-    const dest = targetInput.value.trim();
-    if(!dest) return alert('Enter a destination URL.');
-    try{
-      const { final } = await createEncryptedLink(dest);
-      generated.innerHTML = `<div><strong>Encrypted link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
-    }catch(e){
-      console.error(e);
-      alert('Failed to generate encrypted link (see console).');
-    }
-  });
+      let secret = localStorage.getItem(STORAGE_SECRET);
+      let hmac   = localStorage.getItem(STORAGE_HMAC);
 
-  // If the page is loaded with ?w=, go into verify flow automatically
-  const params = new URLSearchParams(location.search);
-  const w = params.get('w');
-  if(w){
-    // Show verification UI and start automatic checks
-    startVerifyFlow(w);
-  }
-}
-
-// ----------------- verification flow -----------------
-let userInteracted = false;
-function attachHumanChecksOnce(){
-  function mark(){ userInteracted = true; window.removeEventListener('mousemove', mark); window.removeEventListener('touchstart', mark); }
-  window.addEventListener('mousemove', mark, {passive:true});
-  window.addEventListener('touchstart', mark, {passive:true});
-}
-attachHumanChecksOnce();
-
-async function startVerifyFlow(wParam){
-  const generatorCard = document.getElementById('generator');
-  const verifyCard = document.getElementById('verify-screen');
-  const verifyInfo = document.getElementById('verifyInfo');
-  const continueBtn = document.getElementById('continueBtn');
-  const destHint = document.getElementById('destHint');
-
-  generatorCard.style.display = 'none';
-  verifyCard.style.display = 'block';
-
-  let turnstileToken = null;
-  let minDelayPassed = false;
-  setTimeout(()=>{ minDelayPassed = true; updateReadyState(); }, CONFIG.MIN_HUMAN_DELAY_MS);
-
-  window.onTurnstileSuccess = function(token){
-    turnstileToken = token;
-    verifyInfo.textContent = 'Turnstile token received.';
-    updateReadyState();
-    // Attempt automatic server-side verify immediately (may be blocked by CORS)
-    attemptSiteVerify(token).then(ok=>{
-      if(ok) {
-        verifyInfo.textContent = 'Siteverify succeeded (Cloudflare confirmed). Proceeding...';
-        // perform decrypt and redirect automatically
-        proceedDecryptAndRedirect();
+      if (!secret || !hmac) {
+        secret = randBase64(32);
+        hmac   = randBase64(32);
+        try {
+          localStorage.setItem(STORAGE_SECRET, secret);
+          localStorage.setItem(STORAGE_HMAC, hmac);
+          console.info('[Generator] Created new SECRET_KEY and HMAC_KEY.');
+        } catch(e) {
+          console.warn('[Generator] Could not save keys to localStorage:', e);
+        }
       } else {
-        // fallback to manual click after checks
-        verifyInfo.textContent = 'Siteverify failed (or blocked). Please click Continue after interacting.';
+        console.info('[Generator] Loaded keys from localStorage.');
       }
-    });
-  };
 
-  window.onTurnstileExpired = function(){
-    turnstileToken = null;
-    verifyInfo.textContent = 'Turnstile expired — please re-run challenge.';
-    continueBtn.disabled = true;
-    continueBtn.textContent = 'Waiting for verification...';
-  };
+      CONFIG.SECRET_KEY = secret;
+      CONFIG.HMAC_KEY   = hmac;
+      window.__GEN_KEYS = { SECRET_KEY: secret, HMAC_KEY: hmac };
+    })();
 
-  function updateReadyState(){
-    if(turnstileToken && userInteracted && minDelayPassed){
-      continueBtn.disabled = false;
-      continueBtn.textContent = 'Continue';
-    } else {
-      continueBtn.disabled = true;
-      continueBtn.textContent = 'Waiting for verification...';
-    }
-  }
+    // ---------------- UTILS ----------------
+    function safeBtoa(str){ try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str)));} }
+    function safeAtob(s){ try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;}} }
+    function uuid(){ if(crypto.randomUUID) return crypto.randomUUID(); return 'id-'+Math.random().toString(36).slice(2,12); }
 
-  continueBtn.addEventListener('click', async ()=>{
-    if(!userInteracted) return alert('Please interact with the page (move mouse or tap) to confirm human presence.');
-    continueBtn.disabled = true;
-    continueBtn.textContent = 'Verifying...';
+    // ---------------- MAIN ----------------
+    window.addEventListener('DOMContentLoaded',()=>{
 
-    // Try server verify (again) then fallback to client decrypt
-    const ok = await attemptSiteVerify(turnstileToken).catch(()=>false);
-    if(ok){
-      verifyInfo.textContent = 'Cloudflare verification OK - redirecting...';
-      await proceedDecryptAndRedirect();
-      return;
-    }
+      const params = new URLSearchParams(location.search);
+      const w = params.get('w');
 
-    // fallback
-    verifyInfo.textContent = 'Using client-side fallback verification...';
-    await proceedDecryptAndRedirect();
-  });
-
-  // Attempts to POST token to Cloudflare siteverify using embedded TURNSTILE_SECRET
-  async function attemptSiteVerify(token){
-    if(!token) return false;
-    try{
-      const form = new URLSearchParams();
-      form.append('secret', CONFIG.TURNSTILE_SECRET);
-      form.append('response', token);
-      // Note: many browsers will block cross-origin requests to this endpoint due to CORS.
-      const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method:'POST', body: form });
-      if(!resp.ok) return false;
-      const j = await resp.json();
-      // j.success is boolean
-      return !!j.success;
-    }catch(e){
-      console.warn('siteverify attempt failed (CORS/network):', e);
-      return false;
-    }
-  }
-
-  // Decrypt payload in browser and redirect
-  async function proceedDecryptAndRedirect(){
-    try{
-      const encB64 = atob(wParam);
-      const decrypted = await decryptObject(encB64, CONFIG.SECRET_KEY); // envelope with payload and sig
-      const verified = await hmacVerify(decrypted.payload, decrypted.sig, CONFIG.HMAC_KEY);
-      if(!verified){
-        alert('Signature mismatch: payload may have been tampered with.');
+      if(!w){
+        // Show generator if no ?w=
+        document.getElementById('generator').style.display='block';
         return;
       }
-      destHint.textContent = `Redirecting to ${decrypted.payload.u}`;
-      // You wanted reusable links: do not remove or mark single-use
-      setTimeout(()=>{ window.location.href = decrypted.payload.u; }, 350);
-    }catch(e){
-      console.error('Decrypt/verify failed:', e);
-      alert('Decryption or verification failed. See console for details.');
+
+      // ----- VERIFY FLOW -----
+      const decoded = safeAtob(decodeURIComponent(w));
+      let payload;
+      try { payload = JSON.parse(decoded); } catch(e) { payload = {u:decoded}; }
+
+      if(!payload || !payload.u){
+        document.body.innerHTML = '<p style="text-align:center;color:red;">Invalid or malformed link.</p>';
+        return;
+      }
+
+      const dest = payload.u;
+      window.__redirectDest = dest; // store for redirect
+      document.getElementById('verify-screen').style.display='flex';
+
+      // Auto redirect after Cloudflare verification
+      window.onTurnstileSuccess = function(token){
+        console.info('[Verify] Cloudflare challenge passed.');
+        setTimeout(()=>{ window.location.href = window.__redirectDest; }, 300);
+      };
+    });
+
+    // ---------------- GENERATOR ----------------
+    function generateLink(){
+      const dest = document.getElementById('targetInput').value.trim();
+      if(!dest) return alert('Enter a destination URL.');
+      const payload = {u:dest,r:uuid(),t:Date.now()};
+      const encoded = safeBtoa(JSON.stringify(payload));
+      const final = `${CONFIG.PUBLIC_PATH}?w=${encodeURIComponent(encoded)}`;
+      document.getElementById('generated').innerHTML =
+        `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
     }
-  }
-}
-
-// ----------------- simple convenience: if page loads with w param, the verify flow started in setupGenerator() -----------------
-
-</script>
+  </script>
 </head>
+
 <body>
-  <!-- Body UI is built dynamically in JS on DOMContentLoaded -->
+
+  <!-- Generator section -->
+  <div id="generator" class="section" style="display:none;">
+    <h2>Generate an encoded redirect link</h2>
+    <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
+    <button onclick="generateLink()">Generate</button>
+    <div id="generated" style="margin-top:12px;"></div>
+    <div style="margin-top:10px;color:#666;font-size:13px;">
+      All generated links will start with:<br/>
+      <code style="word-break:break-all;">${window.location.origin}/gen.html</code>
+    </div>
+  </div>
+
+  <!-- Minimal verify screen -->
+  <div id="verify-screen">
+    <div id="verify-box">
+      <h2>Verify to Continue</h2>
+      <div class="cf-turnstile"
+           data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL"
+           data-callback="onTurnstileSuccess"></div>
+    </div>
+  </div>
+
 </body>
 </html>
