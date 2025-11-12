@@ -28,8 +28,11 @@ const CONFIG = {
 
 // --- UTILS ---
 function uuid(){return crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2,12);}
-function safeBtoa(str){try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str)));}}
-function safeAtob(s){try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;}}}
+function randomAESKey(){return crypto.getRandomValues(new Uint8Array(32));}
+function buf2hex(buf){return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');}
+function hex2buf(hex){const bytes=new Uint8Array(hex.length/2);for(let i=0;i<bytes.length;i++)bytes[i]=parseInt(hex.substr(i*2,2),16);return bytes;}
+function safeBtoa(str){return btoa(String.fromCharCode(...new Uint8Array(str)));}
+function safeAtob(base64){const bin=atob(base64);const buf=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)buf[i]=bin.charCodeAt(i);return buf;}
 
 // --- RANDOM PAGE TITLE ---
 const pageTitles = [
@@ -38,44 +41,59 @@ const pageTitles = [
 ];
 document.title = pageTitles[Math.floor(Math.random()*pageTitles.length)];
 
+// --- AES ENCRYPT/DECRYPT ---
+async function encryptPayload(payload){
+    const key = await crypto.subtle.generateKey({name:"AES-GCM",length:256},true,["encrypt","decrypt"]);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder().encode(JSON.stringify(payload));
+    const cipher = await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc);
+    const rawKey = await crypto.subtle.exportKey("raw",key);
+    // Encode everything in Base64
+    return `${safeBtoa(rawKey)}.${safeBtoa(iv)}.${safeBtoa(cipher)}`;
+}
+
+async function decryptPayload(blob){
+    const [keyB64, ivB64, cipherB64] = blob.split('.');
+    if(!keyB64 || !ivB64 || !cipherB64) return null;
+    const keyBuf = safeAtob(keyB64);
+    const iv = safeAtob(ivB64);
+    const cipher = safeAtob(cipherB64);
+    const key = await crypto.subtle.importKey("raw",keyBuf,{name:"AES-GCM"},true,["decrypt"]);
+    const decrypted = await crypto.subtle.decrypt({name:"AES-GCM",iv},key,cipher);
+    return JSON.parse(new TextDecoder().decode(decrypted));
+}
+
 // --- MAIN ---
-window.addEventListener('DOMContentLoaded',()=>{
+window.addEventListener('DOMContentLoaded',async ()=>{
     const params = new URLSearchParams(location.search);
     const w = params.get('w');
 
     if(!w){
-        // Show generator
         document.getElementById('generator').style.display='block';
         return;
     }
 
     // --- VERIFY SCREEN ---
-    const decoded = safeAtob(decodeURIComponent(w));
-    let payload;
-    try{payload=JSON.parse(decoded);}catch(e){payload={u:decoded};}
-    if(!payload || !payload.u){
-        document.body.innerHTML='<p style="text-align:center;color:red;">Invalid link.</p>';
-        return;
-    }
-
-    const dest = payload.u;
     document.getElementById('verify-screen').style.display='flex';
-
-    window.onTurnstileSuccess = function(token){
-        // automatic redirect after captcha
-        window.location.href = dest;
+    window.onTurnstileSuccess = async function(token){
+        try{
+            const payload = await decryptPayload(decodeURIComponent(w));
+            if(!payload || !payload.u) throw "Invalid";
+            window.location.href = payload.u;
+        }catch(e){
+            document.body.innerHTML='<p style="text-align:center;color:red;">Invalid or corrupted link.</p>';
+        }
     };
 });
 
 // --- GENERATOR ---
-function generateLink(){
+async function generateLink(){
     const dest = document.getElementById('targetInput').value.trim();
     if(!dest) return alert('Enter a URL.');
 
     const payload = {u:dest,r:uuid(),t:Date.now()};
-    const encoded = safeBtoa(JSON.stringify(payload));
-    const final = `${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encoded)}`;
-
+    const encrypted = await encryptPayload(payload);
+    const final = `${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encrypted)}`;
     document.getElementById('generated').innerHTML=
         `<div><strong>Encrypted link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
 }
