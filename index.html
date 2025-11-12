@@ -1,158 +1,132 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Secure Encrypted Redirect</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Redirect Generator</title>
 <style>
-  html, body { height:100%; margin:0; padding:0; font-family:Arial,Helvetica,sans-serif; background:#f8f9fa; color:#111; }
-  .section { border:1px solid #e0e0e0; padding:14px; border-radius:8px; margin:18px auto; max-width:960px; background:#fff; }
-  input[type="text"] { width:72%; padding:8px; border:1px solid #ccc; border-radius:4px; }
-  button { padding:8px 12px; border-radius:6px; border:0; background:#0366d6; color:#fff; cursor:pointer; }
-  .sample { word-break:break-all; color:#0366d6; text-decoration:none; }
-  #verify-screen { display:none; align-items:center; justify-content:center; height:100vh; background:#f8f9fa; }
-  #verify-box { background:#fff; padding:40px 50px; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.1); text-align:center; }
-  h2 { font-weight:500; margin-bottom:20px; }
+html,body {
+  height:100%; margin:0; padding:0;
+  font-family:Arial,Helvetica,sans-serif;
+  background:#f8f9fa; color:#111;
+}
+.section {
+  border:1px solid #e0e0e0; padding:14px; border-radius:8px;
+  margin:18px auto; max-width:960px; background:#fff;
+}
+input[type="text"] {
+  width:72%; padding:8px; border:1px solid #ccc; border-radius:4px;
+}
+button {
+  padding:8px 12px; border-radius:6px; border:0;
+  background:#0366d6; color:#fff; cursor:pointer;
+}
+.sample { word-break:break-all; color:#0366d6; text-decoration:none; }
+#verify-screen {
+  display:none; align-items:center; justify-content:center;
+  height:100vh; background:#f8f9fa;
+}
+#verify-box {
+  background:#fff; padding:30px; border-radius:10px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.1); text-align:center;
+}
+h2 { font-weight:500; margin-bottom:14px; }
 </style>
 
+<!-- Cloudflare Turnstile -->
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
 <script>
+// ------------------ CONFIG ------------------
 const CONFIG = {
-  PUBLIC_PATH: window.location.origin + window.location.pathname,
-  TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL' // <-- Update with your key
+  PUBLIC_HOST: window.location.origin + '/', 
+  TURNSTILE_SITE_KEY: 'YOUR_TURNSTILE_SITE_KEY', // <---- REPLACE YOUR KEY
 };
 
-// ------------------ UTILS ------------------
-function randBytes(len){ const b = new Uint8Array(len); crypto.getRandomValues(b); return b; }
-function b64Encode(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
-function b64Decode(str){ str = str.replace(/-/g,'+').replace(/_/g,'/'); while(str.length %4) str+='='; const bin = atob(str); const buf = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i); return buf; }
+// ------------------ CRYPTO UTILITIES ------------------
+function safeBtoa(str){ try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str)));} }
+function safeAtob(s){ try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;}} }
 function uuid(){ return crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2,12); }
-async function sha256(str){ const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str)); return b64Encode(buf); }
-function getFingerprint(){ return navigator.userAgent + screen.width + screen.height + Intl.DateTimeFormat().resolvedOptions().timeZone; }
-
-// ------------------ ENCRYPTION ------------------
-async function generateKey(){ return crypto.subtle.generateKey({name:"AES-GCM", length:256}, true, ["encrypt","decrypt"]); }
-async function importKey(raw){ return crypto.subtle.importKey("raw", raw, "AES-GCM", true, ["encrypt","decrypt"]); }
-async function encryptText(key, plaintext){
-  const iv = randBytes(12);
-  const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv}, new TextEncoder().encode(plaintext));
-  return {iv: b64Encode(iv), ct: b64Encode(ct)};
-}
-async function decryptText(key, iv, ct){
-  const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv:b64Decode(iv)}, key, b64Decode(ct));
-  return new TextDecoder().decode(pt);
+function generateRandomWords(count=2){
+  const words=["forest","river","mountain","star","moon","cloud","leaf","stone","sun","wave","sky","tree","spark","crystal"];
+  let result=[];
+  for(let i=0;i<count;i++) result.push(words[Math.floor(Math.random()*words.length)] + '-' + Math.random().toString(36).slice(2,4));
+  return result.join('/');
 }
 
-// ------------------ HMAC ------------------
-async function importHMACKey(raw){ return crypto.subtle.importKey("raw", raw, {name:"HMAC", hash:"SHA-256"}, true, ["sign","verify"]); }
-async function signHMAC(key, msg){ const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg)); return b64Encode(sig); }
-async function verifyHMAC(key, msg, sig){ return crypto.subtle.verify("HMAC", key, b64Decode(sig), new TextEncoder().encode(msg)); }
-
-// ------------------ RANDOM TITLE ------------------
-function generateRandomTitle() {
-  const adjectives = ["Secure","Fast","Easy","Trusted","Simple","Smart","Quick","Reliable","Safe","Fresh"];
-  const nouns = ["Access","Portal","Link","Page","Gateway","Service","Connection","Resource","Tool","Hub"];
-  return `${adjectives[Math.floor(Math.random()*adjectives.length)]} ${nouns[Math.floor(Math.random()*nouns.length)]}`;
-}
-
-// ------------------ LANGUAGE DETECTION ------------------
-function getBrowserLanguage() {
-  const lang = navigator.language || navigator.userLanguage || 'en';
-  return lang.split('-')[0];
-}
-
-const TEXTS = {
-  en: { verify: "Verify to Continue" },
-  es: { verify: "Verificar para Continuar" },
-  fr: { verify: "Vérifier pour continuer" },
-  de: { verify: "Verifizieren, um fortzufahren" },
-  it: { verify: "Verifica per continuare" },
-  pt: { verify: "Verificar para continuar" },
-  ru: { verify: "Подтвердите, чтобы продолжить" },
-  zh: { verify: "验证以继续" },
-  ja: { verify: "続行するには認証" },
-};
-
-// ------------------ GENERATE LINK ------------------
-async function generateLink(){
-  const dest = document.getElementById('targetInput').value.trim();
-  if(!dest) return alert("Enter destination URL.");
-
-  const aesRaw = randBytes(32);
-  const hmacRaw = randBytes(32);
-  const aesKey = await importKey(aesRaw);
-  const hmacKey = await importHMACKey(hmacRaw);
-
-  const encrypted = await encryptText(aesKey, dest);
-  const title = generateRandomTitle();
-
-  const payloadObj = {
-    iv: encrypted.iv,
-    ct: encrypted.ct,
-    r: uuid(),
-    fp: await sha256(getFingerprint()), // stored but not enforced
-    k: b64Encode(aesRaw),
-    h: b64Encode(hmacRaw),
-    title: title
-  };
-
-  const payloadStr = JSON.stringify(payloadObj);
-  const sig = await signHMAC(hmacKey, payloadStr);
-  const finalPayload = b64Encode(new TextEncoder().encode(JSON.stringify({p:payloadObj, s:sig})));
-
-  const finalLink = `${CONFIG.PUBLIC_PATH}?w=${encodeURIComponent(finalPayload)}`;
-  document.getElementById('generated').innerHTML = `<div><strong>Encrypted link:</strong><br/><a class="sample" href="${finalLink}" target="_blank">${finalLink}</a></div>`;
+// ------------------ LINK GENERATION ------------------
+function generateLink(){
+  const dest=document.getElementById('targetInput').value.trim();
+  if(!dest) return alert('Enter a destination URL.');
+  
+  // Auto-generate per-link secret
+  const SECRET_KEY=crypto.getRandomValues(new Uint8Array(32));
+  const HMAC_KEY=crypto.getRandomValues(new Uint8Array(32));
+  
+  const payload={u:dest,r:uuid(),t:Date.now(),s:Array.from(SECRET_KEY),h:Array.from(HMAC_KEY)};
+  const encoded=safeBtoa(JSON.stringify(payload));
+  const randomPath=generateRandomWords();
+  const final=`${CONFIG.PUBLIC_HOST}${randomPath}/${encoded}`;
+  
+  document.getElementById('generated').innerHTML=
+    `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
 }
 
 // ------------------ VERIFY FLOW ------------------
-window.addEventListener('DOMContentLoaded', async ()=>{
-  const params = new URLSearchParams(location.search);
-  const w = params.get('w');
-  if(!w){
+window.addEventListener('DOMContentLoaded',()=>{
+  const pathParts=location.pathname.split('/').filter(Boolean);
+  if(pathParts.length<2){
     document.getElementById('generator').style.display='block';
     return;
   }
 
-  const userLang = getBrowserLanguage();
-  const langTexts = TEXTS[userLang] || TEXTS['en'];
-  document.querySelector('#verify-box h2').textContent = langTexts.verify;
+  const encoded=pathParts.pop(); // last segment is payload
+  const decoded=safeAtob(decodeURIComponent(encoded));
+  let payload;
+  try{payload=JSON.parse(decoded);}catch(e){payload={u:decoded};}
+  if(!payload||!payload.u){
+    document.body.innerHTML='<p style="text-align:center;color:red;">Invalid or malformed link.</p>';
+    return;
+  }
 
-  let payloadFull;
-  try{ payloadFull = JSON.parse(new TextDecoder().decode(b64Decode(decodeURIComponent(w)))); }catch(e){ payloadFull=null; }
-  if(!payloadFull || !payloadFull.p || !payloadFull.s){ document.body.innerHTML="<p style='text-align:center;color:red;'>Invalid link.</p>"; return; }
-
-  const aesKey = await importKey(b64Decode(payloadFull.p.k));
-  const hmacKey = await importHMACKey(b64Decode(payloadFull.p.h));
-
-  const valid = await verifyHMAC(hmacKey, JSON.stringify(payloadFull.p), payloadFull.s);
-  if(!valid){ document.body.innerHTML="<p style='text-align:center;color:red;'>HMAC verification failed.</p>"; return; }
-
-  const dest = await decryptText(aesKey, payloadFull.p.iv, payloadFull.p.ct);
-  document.title = payloadFull.p.title || "Secure Redirect"; // random title
-  window.__redirectDest = dest;
+  const dest=payload.u;
   document.getElementById('verify-screen').style.display='flex';
+  const btn=document.getElementById('continueBtn');
+  let verified=false;
 
-  // Automatic redirect after CAPTCHA
-  window.onTurnstileSuccess = ()=> window.location.href = window.__redirectDest;
+  window.onTurnstileSuccess=function(token){
+    verified=true;
+    btn.disabled=false;
+    btn.textContent='Continue';
+  };
+
+  btn.addEventListener('click',()=>{
+    if(!verified){ alert('Please complete the verification first.'); return; }
+    btn.disabled=true;
+    btn.textContent='Redirecting...';
+    setTimeout(()=>window.location.href=dest,500);
+  });
+
+  // Random page title
+  const titles=["Explore New Horizons","Hidden Journey","Mystery Path","Secret Portal","Adventure Awaits","The Unknown"];
+  document.title=titles[Math.floor(Math.random()*titles.length)];
 });
 </script>
 </head>
 <body>
 
-<!-- Generator -->
 <div id="generator" class="section" style="display:none;">
-  <h2>Generate a secure encrypted redirect link</h2>
-  <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)">
+  <h2>Generate an encoded redirect link</h2>
+  <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
   <button onclick="generateLink()">Generate</button>
   <div id="generated" style="margin-top:12px;"></div>
 </div>
 
-<!-- Verify screen -->
 <div id="verify-screen">
   <div id="verify-box">
     <h2>Verify to Continue</h2>
-    <div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
+    <div class="cf-turnstile" data-sitekey="YOUR_TURNSTILE_SITE_KEY" data-callback="onTurnstileSuccess"></div>
+    <button id="continueBtn" disabled>Waiting for verification...</button>
   </div>
 </div>
 
