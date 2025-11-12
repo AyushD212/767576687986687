@@ -1,176 +1,117 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Redirect Generator</title>
-  <style>
-    html,body {
-      height:100%; margin:0; padding:0;
-      font-family:Arial,Helvetica,sans-serif;
-      background:#f8f9fa; color:#111;
-    }
-    .section {
-      border:1px solid #e0e0e0; padding:14px; border-radius:8px;
-      margin:18px auto; max-width:960px; background:#fff;
-    }
-    input[type="text"] {
-      width:72%; padding:8px; border:1px solid #ccc; border-radius:4px;
-    }
-    button {
-      padding:8px 12px; border-radius:6px; border:0;
-      background:#0366d6; color:#fff; cursor:pointer;
-    }
-    .sample { word-break:break-all; color:#0366d6; text-decoration:none; }
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Redirect Generator</title>
+<style>
+  html,body { height:100%; margin:0; padding:0; font-family:Arial,Helvetica,sans-serif; background:#f8f9fa; color:#111; }
+  .section { border:1px solid #e0e0e0; padding:14px; border-radius:8px; margin:18px auto; max-width:960px; background:#fff; }
+  input[type="text"] { width:72%; padding:8px; border:1px solid #ccc; border-radius:4px; }
+  button { padding:8px 12px; border-radius:6px; border:0; background:#0366d6; color:#fff; cursor:pointer; }
+  .sample { word-break:break-all; color:#0366d6; text-decoration:none; }
 
-    /* Verify screen */
-    #verify-screen {
-      display:none;
-      align-items:center;
-      justify-content:center;
-      height:100vh;
-      background:#f8f9fa;
+  #verify-screen { display:none; align-items:center; justify-content:center; height:100vh; background:#f8f9fa; }
+  #verify-box { background:#fff; padding:40px 50px; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.1); text-align:center; }
+  h2 { font-weight:500; margin-bottom:20px; }
+</style>
+
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
+<script>
+  // ---------------- CONFIG ----------------
+  const CONFIG = {
+    PUBLIC_PATH: window.location.origin + window.location.pathname,
+
+    // ----- CLOUD FLARE KEYS -----
+    TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',
+    TURNSTILE_SECRET:   '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4',
+
+    SECRET_KEY: null,   // AES password (auto-generated)
+    HMAC_KEY: null      // HMAC signing key (auto-generated)
+  };
+
+  // ---------------- AUTO-GENERATE KEYS ----------------
+  (function autoGenerateKeys() {
+    const STORAGE_SECRET = 'gen_secret_key';
+    const STORAGE_HMAC   = 'gen_hmac_key';
+
+    function randBase64(lenBytes) {
+      const b = new Uint8Array(lenBytes);
+      crypto.getRandomValues(b);
+      let s = '';
+      for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+      return btoa(s);
     }
-    #verify-box {
-      background:#fff;
-      padding:40px 50px;
-      border-radius:12px;
-      box-shadow:0 4px 16px rgba(0,0,0,0.1);
-      text-align:center;
+
+    let secret = localStorage.getItem(STORAGE_SECRET);
+    let hmac   = localStorage.getItem(STORAGE_HMAC);
+
+    if (!secret || !hmac) {
+      secret = randBase64(32);
+      hmac   = randBase64(32);
+      try {
+        localStorage.setItem(STORAGE_SECRET, secret);
+        localStorage.setItem(STORAGE_HMAC, hmac);
+      } catch(e) { console.warn(e); }
     }
-    h2 { font-weight:500; margin-bottom:20px; }
-  </style>
 
-  <!-- Cloudflare Turnstile -->
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    CONFIG.SECRET_KEY = secret;
+    CONFIG.HMAC_KEY   = hmac;
+  })();
 
-  <script>
-    // ---------------- CONFIG ----------------
-    const CONFIG = {
-      PUBLIC_PATH: window.location.origin + window.location.pathname,
+  // ---------------- UTILS ----------------
+  function safeBtoa(str){ try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str)));} }
+  function safeAtob(s){ try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;}} }
+  function uuid(){ if(crypto.randomUUID) return crypto.randomUUID(); return 'id-'+Math.random().toString(36).slice(2,12); }
 
-      // ----- CLOUD FLARE KEYS -----
-      TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',
-      TURNSTILE_SECRET:   '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4',
+  // ---------------- MAIN ----------------
+  window.addEventListener('DOMContentLoaded',()=>{
+    const params = new URLSearchParams(location.search);
+    const w = params.get('w');
 
-      SECRET_KEY: null,   // AES password (auto-generated)
-      HMAC_KEY:   null,   // HMAC signing key (auto-generated)
+    if(!w){
+      document.getElementById('generator').style.display='block';
+      return;
+    }
 
-      PBKDF2_SALT: 'static-salt-you-may-change',
-      PBKDF2_ITER: 120000,
-      MIN_HUMAN_DELAY_MS: 1500,
-      AUTO_OPEN_AFTER_GENERATE: true
+    // ----- VERIFY FLOW -----
+    const decoded = safeAtob(decodeURIComponent(w));
+    let payload;
+    try { payload = JSON.parse(decoded); } catch(e) { payload = {u:decoded}; }
+
+    if(!payload || !payload.u){
+      document.body.innerHTML = '<p style="text-align:center;color:red;">Invalid or malformed link.</p>';
+      return;
+    }
+
+    const dest = payload.u;
+    window.__redirectDest = dest;
+    document.getElementById('verify-screen').style.display='flex';
+
+    // Auto redirect immediately after Cloudflare verification
+    window.onTurnstileSuccess = function(token){
+      window.location.href = window.__redirectDest;
     };
+  });
 
-    // ---------------- AUTO-GENERATE KEYS ----------------
-    (function autoGenerateKeys() {
-      const STORAGE_SECRET = 'gen_secret_key';
-      const STORAGE_HMAC   = 'gen_hmac_key';
-
-      function randBase64(lenBytes) {
-        const b = new Uint8Array(lenBytes);
-        crypto.getRandomValues(b);
-        let s = '';
-        for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
-        return btoa(s);
-      }
-
-      let secret = localStorage.getItem(STORAGE_SECRET);
-      let hmac   = localStorage.getItem(STORAGE_HMAC);
-
-      if (!secret || !hmac) {
-        secret = randBase64(32);
-        hmac   = randBase64(32);
-        try {
-          localStorage.setItem(STORAGE_SECRET, secret);
-          localStorage.setItem(STORAGE_HMAC, hmac);
-          console.info('[Generator] Created new SECRET_KEY and HMAC_KEY.');
-        } catch(e) {
-          console.warn('[Generator] Could not save keys to localStorage:', e);
-        }
-      } else {
-        console.info('[Generator] Loaded keys from localStorage.');
-      }
-
-      CONFIG.SECRET_KEY = secret;
-      CONFIG.HMAC_KEY   = hmac;
-      window.__GEN_KEYS = { SECRET_KEY: secret, HMAC_KEY: hmac };
-    })();
-
-    // ---------------- UTILS ----------------
-    function safeBtoa(str){ try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str)));} }
-    function safeAtob(s){ try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;}} }
-    function uuid(){ if(crypto.randomUUID) return crypto.randomUUID(); return 'id-'+Math.random().toString(36).slice(2,12); }
-
-    // ---------------- MAIN ----------------
-    window.addEventListener('DOMContentLoaded',()=>{
-
-      const params = new URLSearchParams(location.search);
-      const w = params.get('w');
-
-      if(!w){
-        // Show generator if no ?w=
-        document.getElementById('generator').style.display='block';
-        return;
-      }
-
-      // ----- VERIFY FLOW -----
-      const decoded = safeAtob(decodeURIComponent(w));
-      let payload;
-      try { payload = JSON.parse(decoded); } catch(e) { payload = {u:decoded}; }
-
-      if(!payload || !payload.u){
-        document.body.innerHTML = '<p style="text-align:center;color:red;">Invalid or malformed link.</p>';
-        return;
-      }
-
-      const dest = payload.u;
-      window.__redirectDest = dest; // store for redirect
-      document.getElementById('verify-screen').style.display='flex';
-
-      // Auto redirect after Cloudflare verification
-      window.onTurnstileSuccess = function(token){
-        console.info('[Verify] Cloudflare challenge passed.');
-        setTimeout(()=>{ window.location.href = window.__redirectDest; }, 300);
-      };
-    });
-
-    // ---------------- GENERATOR ----------------
-    function generateLink(){
-      const dest = document.getElementById('targetInput').value.trim();
-      if(!dest) return alert('Enter a destination URL.');
-      const payload = {u:dest,r:uuid(),t:Date.now()};
-      const encoded = safeBtoa(JSON.stringify(payload));
-      const final = `${CONFIG.PUBLIC_PATH}?w=${encodeURIComponent(encoded)}`;
-      document.getElementById('generated').innerHTML =
-        `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
-    }
-  </script>
+  // ---------------- GENERATOR ----------------
+  function generateLink(){
+    const dest = document.getElementById('targetInput').value.trim();
+    if(!dest) return alert('Enter a destination URL.');
+    const payload = {u:dest,r:uuid(),t:Date.now()};
+    const encoded = safeBtoa(JSON.stringify(payload));
+    const final = `${CONFIG.PUBLIC_PATH}?w=${encodeURIComponent(encoded)}`;
+    document.getElementById('generated').innerHTML =
+      `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
+  }
+</script>
 </head>
 
 <body>
 
-  <!-- Generator section -->
-  <div id="generator" class="section" style="display:none;">
-    <h2>Generate an encoded redirect link</h2>
-    <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
-    <button onclick="generateLink()">Generate</button>
-    <div id="generated" style="margin-top:12px;"></div>
-    <div style="margin-top:10px;color:#666;font-size:13px;">
-      All generated links will start with:<br/>
-      <code style="word-break:break-all;">${window.location.origin}/gen.html</code>
-    </div>
-  </div>
-
-  <!-- Minimal verify screen -->
-  <div id="verify-screen">
-    <div id="verify-box">
-      <h2>Verify to Continue</h2>
-      <div class="cf-turnstile"
-           data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL"
-           data-callback="onTurnstileSuccess"></div>
-    </div>
-  </div>
-
-</body>
-</html>
+<!-- Generator section -->
+<div id="generator" class="section" style="display:none;">
+  <h2>Generate an encoded redirect link</h2>
+  <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
+  <button onclick
