@@ -120,9 +120,28 @@ window.addEventListener('DOMContentLoaded', async ()=>{
 <div id="verify-screen">
   <div id="verify-box">
     <h2>Verify to Continue</h2>
-    <div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
+    <div class="cf-turnstile" 
+         data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" 
+         data-callback="onTurnstileSuccess"></div>
+    <button id="continueBtn" disabled style="margin-top:20px; padding:10px 20px; border-radius:6px; border:0; background:#0366d6; color:#fff; cursor:pointer;">
+      Waiting for verification...
+    </button>
   </div>
 </div>
 
-</body>
-</html>
+<script>
+const btn = document.getElementById('continueBtn');
+
+// After CAPTCHA is solved, enable button
+window.onTurnstileSuccess = function(token){
+  btn.disabled = false;
+  btn.textContent = 'Continue';
+};
+
+btn.addEventListener('click', ()=>{
+  if(!window.__redirectDest) return;
+  btn.disabled = true;
+  btn.textContent = 'Redirecting...';
+  window.location.href = window.__redirectDest;
+});
+</script>
