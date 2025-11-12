@@ -114,4 +114,19 @@
 <div id="generator" class="section" style="display:none;">
   <h2>Generate an encoded redirect link</h2>
   <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
-  <button onclick
+  <button onclick="generateLink()">Generate</button>
+  <div id="generated" style="margin-top:12px;"></div>
+</div>
+
+<!-- Minimal verify screen -->
+<div id="verify-screen">
+  <div id="verify-box">
+    <h2>Verify to Continue</h2>
+    <div class="cf-turnstile"
+         data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL"
+         data-callback="onTurnstileSuccess"></div>
+  </div>
+</div>
+
+</body>
+</html>
