@@ -1,16 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Redirect Generator</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Encrypted Redirect Generator</title>
 <style>
-  html,body { height:100%; margin:0; padding:0; font-family:Arial,Helvetica,sans-serif; background:#f8f9fa; color:#111; }
+  html, body { height:100%; margin:0; padding:0; font-family:Arial,Helvetica,sans-serif; background:#f8f9fa; color:#111; }
   .section { border:1px solid #e0e0e0; padding:14px; border-radius:8px; margin:18px auto; max-width:960px; background:#fff; }
   input[type="text"] { width:72%; padding:8px; border:1px solid #ccc; border-radius:4px; }
   button { padding:8px 12px; border-radius:6px; border:0; background:#0366d6; color:#fff; cursor:pointer; }
   .sample { word-break:break-all; color:#0366d6; text-decoration:none; }
-
   #verify-screen { display:none; align-items:center; justify-content:center; height:100vh; background:#f8f9fa; }
   #verify-box { background:#fff; padding:40px 50px; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.1); text-align:center; }
   h2 { font-weight:500; margin-bottom:20px; }
@@ -19,112 +18,109 @@
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
 <script>
-  // ---------------- CONFIG ----------------
-  const CONFIG = {
-    PUBLIC_PATH: window.location.origin + window.location.pathname,
+const CONFIG = {
+  PUBLIC_PATH: window.location.origin + window.location.pathname,
+  TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL', // <-- update this with your key
+};
 
-    // ----- CLOUD FLARE KEYS -----
-    TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',
-    TURNSTILE_SECRET:   '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4',
+// ------------------ UTILS ------------------
+function randBytes(len){ const b = new Uint8Array(len); crypto.getRandomValues(b); return b; }
+function b64Encode(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function b64Decode(str){ str = str.replace(/-/g,'+').replace(/_/g,'/'); while(str.length %4) str+='='; const bin = atob(str); const buf = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i); return buf; }
+function uuid(){ return crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2,12); }
 
-    SECRET_KEY: null,   // AES password (auto-generated)
-    HMAC_KEY: null      // HMAC signing key (auto-generated)
+// ------------------ ENCRYPTION ------------------
+async function generateKey(){ return crypto.subtle.generateKey({name:"AES-GCM", length:256}, true, ["encrypt","decrypt"]); }
+async function importKey(raw){ return crypto.subtle.importKey("raw", raw, "AES-GCM", true, ["encrypt","decrypt"]); }
+async function encryptText(key, plaintext){
+  const enc = new TextEncoder();
+  const iv = randBytes(12);
+  const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv}, key, enc.encode(plaintext));
+  return {iv: b64Encode(iv), ct: b64Encode(ct)};
+}
+async function decryptText(key, iv, ct){
+  const dec = new TextDecoder();
+  const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv:b64Decode(iv)}, key, b64Decode(ct));
+  return dec.decode(pt);
+}
+
+// ------------------ HMAC ------------------
+async function importHMACKey(raw){ return crypto.subtle.importKey("raw", raw, {name:"HMAC", hash:"SHA-256"}, true, ["sign","verify"]); }
+async function signHMAC(key, msg){ const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg)); return b64Encode(sig); }
+async function verifyHMAC(key, msg, sig){ return crypto.subtle.verify("HMAC", key, b64Decode(sig), new TextEncoder().encode(msg)); }
+
+// ------------------ LINK GENERATOR ------------------
+async function generateLink(){
+  const dest = document.getElementById('targetInput').value.trim();
+  if(!dest) return alert("Enter destination URL.");
+
+  const aesRaw = randBytes(32);
+  const hmacRaw = randBytes(32);
+  const aesKey = await importKey(aesRaw);
+  const hmacKey = await importHMACKey(hmacRaw);
+
+  const encrypted = await encryptText(aesKey, dest);
+
+  const payloadObj = {
+    iv: encrypted.iv,
+    ct: encrypted.ct,
+    r: uuid(),
+    t: Date.now(),
+    k: b64Encode(aesRaw),
+    h: b64Encode(hmacRaw)
   };
 
-  // ---------------- AUTO-GENERATE KEYS ----------------
-  (function autoGenerateKeys() {
-    const STORAGE_SECRET = 'gen_secret_key';
-    const STORAGE_HMAC   = 'gen_hmac_key';
+  const payloadStr = JSON.stringify(payloadObj);
+  const sig = await signHMAC(hmacKey, payloadStr);
+  const finalPayload = b64Encode(new TextEncoder().encode(JSON.stringify({p:payloadObj, s:sig})));
 
-    function randBase64(lenBytes) {
-      const b = new Uint8Array(lenBytes);
-      crypto.getRandomValues(b);
-      let s = '';
-      for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
-      return btoa(s);
-    }
+  const finalLink = `${CONFIG.PUBLIC_PATH}?w=${encodeURIComponent(finalPayload)}`;
+  document.getElementById('generated').innerHTML = `<div><strong>Encrypted link:</strong><br/><a class="sample" href="${finalLink}" target="_blank">${finalLink}</a></div>`;
+}
 
-    let secret = localStorage.getItem(STORAGE_SECRET);
-    let hmac   = localStorage.getItem(STORAGE_HMAC);
-
-    if (!secret || !hmac) {
-      secret = randBase64(32);
-      hmac   = randBase64(32);
-      try {
-        localStorage.setItem(STORAGE_SECRET, secret);
-        localStorage.setItem(STORAGE_HMAC, hmac);
-      } catch(e) { console.warn(e); }
-    }
-
-    CONFIG.SECRET_KEY = secret;
-    CONFIG.HMAC_KEY   = hmac;
-  })();
-
-  // ---------------- UTILS ----------------
-  function safeBtoa(str){ try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str)));} }
-  function safeAtob(s){ try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;}} }
-  function uuid(){ if(crypto.randomUUID) return crypto.randomUUID(); return 'id-'+Math.random().toString(36).slice(2,12); }
-
-  // ---------------- MAIN ----------------
-  window.addEventListener('DOMContentLoaded',()=>{
-    const params = new URLSearchParams(location.search);
-    const w = params.get('w');
-
-    if(!w){
-      document.getElementById('generator').style.display='block';
-      return;
-    }
-
-    // ----- VERIFY FLOW -----
-    const decoded = safeAtob(decodeURIComponent(w));
-    let payload;
-    try { payload = JSON.parse(decoded); } catch(e) { payload = {u:decoded}; }
-
-    if(!payload || !payload.u){
-      document.body.innerHTML = '<p style="text-align:center;color:red;">Invalid or malformed link.</p>';
-      return;
-    }
-
-    const dest = payload.u;
-    window.__redirectDest = dest;
-    document.getElementById('verify-screen').style.display='flex';
-
-    // Auto redirect immediately after Cloudflare verification
-    window.onTurnstileSuccess = function(token){
-      window.location.href = window.__redirectDest;
-    };
-  });
-
-  // ---------------- GENERATOR ----------------
-  function generateLink(){
-    const dest = document.getElementById('targetInput').value.trim();
-    if(!dest) return alert('Enter a destination URL.');
-    const payload = {u:dest,r:uuid(),t:Date.now()};
-    const encoded = safeBtoa(JSON.stringify(payload));
-    const final = `${CONFIG.PUBLIC_PATH}?w=${encodeURIComponent(encoded)}`;
-    document.getElementById('generated').innerHTML =
-      `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
+// ------------------ VERIFY FLOW ------------------
+window.addEventListener('DOMContentLoaded', async ()=>{
+  const params = new URLSearchParams(location.search);
+  const w = params.get('w');
+  if(!w){
+    document.getElementById('generator').style.display='block';
+    return;
   }
+
+  let payloadFull;
+  try{ payloadFull = JSON.parse(new TextDecoder().decode(b64Decode(decodeURIComponent(w)))); }catch(e){ payloadFull=null; }
+  if(!payloadFull || !payloadFull.p || !payloadFull.s){ document.body.innerHTML="<p style='text-align:center;color:red;'>Invalid link.</p>"; return; }
+
+  const aesKey = await importKey(b64Decode(payloadFull.p.k));
+  const hmacKey = await importHMACKey(b64Decode(payloadFull.p.h));
+
+  const valid = await verifyHMAC(hmacKey, JSON.stringify(payloadFull.p), payloadFull.s);
+  if(!valid){ document.body.innerHTML="<p style='text-align:center;color:red;'>HMAC verification failed.</p>"; return; }
+
+  const dest = await decryptText(aesKey, payloadFull.p.iv, payloadFull.p.ct);
+  window.__redirectDest = dest;
+  document.getElementById('verify-screen').style.display='flex';
+
+  // After Cloudflare CAPTCHA, redirect immediately
+  window.onTurnstileSuccess = ()=> window.location.href = window.__redirectDest;
+});
 </script>
 </head>
-
 <body>
 
-<!-- Generator section -->
+<!-- Generator -->
 <div id="generator" class="section" style="display:none;">
-  <h2>Generate an encoded redirect link</h2>
-  <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
+  <h2>Generate a heavily encrypted redirect link</h2>
+  <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)">
   <button onclick="generateLink()">Generate</button>
   <div id="generated" style="margin-top:12px;"></div>
 </div>
 
-<!-- Minimal verify screen -->
+<!-- Verify screen -->
 <div id="verify-screen">
   <div id="verify-box">
     <h2>Verify to Continue</h2>
-    <div class="cf-turnstile"
-         data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL"
-         data-callback="onTurnstileSuccess"></div>
+    <div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
   </div>
 </div>
 
