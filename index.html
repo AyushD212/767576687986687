@@ -1,135 +1,129 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Redirect Generator</title>
-<style>
-html,body {
-  height:100%; margin:0; padding:0;
-  font-family:Arial,Helvetica,sans-serif;
-  background:#f8f9fa; color:#111;
-}
-.section {
-  border:1px solid #e0e0e0; padding:14px; border-radius:8px;
-  margin:18px auto; max-width:960px; background:#fff;
-}
-input[type="text"] {
-  width:72%; padding:8px; border:1px solid #ccc; border-radius:4px;
-}
-button {
-  padding:8px 12px; border-radius:6px; border:0;
-  background:#0366d6; color:#fff; cursor:pointer;
-}
-.sample { word-break:break-all; color:#0366d6; text-decoration:none; }
-#verify-screen {
-  display:none; align-items:center; justify-content:center;
-  height:100vh; background:#f8f9fa;
-}
-#verify-box {
-  background:#fff; padding:30px; border-radius:10px;
-  box-shadow:0 4px 16px rgba(0,0,0,0.1); text-align:center;
-}
-h2 { font-weight:500; margin-bottom:14px; }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
 
-<!-- Cloudflare Turnstile -->
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <!-- Random page title immediately -->
+  <script>
+    const pageTitles = [
+      "Explore New Horizons",
+      "Hidden Journey",
+      "Mystery Path",
+      "Secret Portal",
+      "Adventure Awaits",
+      "The Unknown",
+      "Secret Passage",
+      "Lost Trail",
+      "Enchanted Gateway",
+      "Whispering Woods"
+    ];
+    document.title = pageTitles[Math.floor(Math.random() * pageTitles.length)];
+  </script>
 
-<script>
-// ------------------ CONFIG ------------------
-const CONFIG = {
-  PUBLIC_HOST: window.location.origin + '/gen.html',
-  TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL', // your Turnstile Site Key
-  TURNSTILE_SECRET:   '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4' // your Turnstile Secret Key
-};
+  <style>
+    html,body {height:100%; margin:0; padding:0; font-family:Arial,sans-serif; background:#f8f9fa; color:#111;}
+    .section {border:1px solid #e0e0e0; padding:14px; border-radius:8px; margin:18px auto; max-width:960px; background:#fff;}
+    input[type="text"] {width:72%; padding:8px; border:1px solid #ccc; border-radius:4px;}
+    button {padding:8px 12px; border-radius:6px; border:0; background:#0366d6; color:#fff; cursor:pointer;}
+    .sample {word-break:break-all; color:#0366d6; text-decoration:none;}
+    #verify-screen {display:none; align-items:center; justify-content:center; height:100vh; background:#f8f9fa;}
+    #verify-box {background:#fff; padding:30px; border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.1); text-align:center;}
+    h2 {font-weight:500; margin-bottom:14px;}
+  </style>
 
-// ------------------ RANDOM PAGE TITLES ------------------
-const pageTitles = [
-  "Explore New Horizons",
-  "Hidden Journey",
-  "Mystery Path",
-  "Secret Portal",
-  "Adventure Awaits",
-  "The Unknown",
-  "Secret Passage",
-  "Lost Trail",
-  "Enchanted Gateway",
-  "Whispering Woods"
-];
-function getRandomTitle() { return pageTitles[Math.floor(Math.random() * pageTitles.length)]; }
-document.title = getRandomTitle();
+  <!-- Cloudflare Turnstile -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
-// ------------------ CRYPTO UTILITIES ------------------
-function safeBtoa(str){ try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str))); } }
-function safeAtob(s){ try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;} } }
-function uuid(){ return crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2,12); }
-
-// ------------------ LINK GENERATION ------------------
-function generateLink(){
-  const dest=document.getElementById('targetInput').value.trim();
-  if(!dest) return alert('Enter a destination URL.');
-
-  const SECRET_KEY=crypto.getRandomValues(new Uint8Array(32));
-  const HMAC_KEY=crypto.getRandomValues(new Uint8Array(32));
-
-  const payload={u:dest,r:uuid(),t:Date.now(),s:Array.from(SECRET_KEY),h:Array.from(HMAC_KEY)};
-  const encoded=safeBtoa(JSON.stringify(payload));
-  const final=`${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encoded)}`;
-
-  document.getElementById('generated').innerHTML=
-    `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
-}
-
-// ------------------ VERIFY FLOW ------------------
-window.addEventListener('DOMContentLoaded',()=>{
-  const params=new URLSearchParams(location.search);
-  const w=params.get('w');
-  if(!w){ document.getElementById('generator').style.display='block'; return; }
-
-  const decoded=safeAtob(decodeURIComponent(w));
-  let payload;
-  try{payload=JSON.parse(decoded);}catch(e){payload={u:decoded};}
-  if(!payload||!payload.u){ document.body.innerHTML='<p style="text-align:center;color:red;">Invalid or malformed link.</p>'; return; }
-
-  const dest=payload.u;
-  document.getElementById('verify-screen').style.display='flex';
-  const btn=document.getElementById('continueBtn');
-  let verified=false;
-
-  window.onTurnstileSuccess=function(token){
-    verified=true;
-    btn.disabled=false;
-    btn.textContent='Continue';
-  };
-
-  btn.addEventListener('click',()=>{
-    if(!verified){ alert('Please complete the verification first.'); return; }
-    btn.disabled=true;
-    btn.textContent='Redirecting...';
-    setTimeout(()=>window.location.href=dest,500);
-  });
-
-  document.title = getRandomTitle();
-});
-</script>
 </head>
 <body>
 
-<div id="generator" class="section" style="display:none;">
-  <h2>Generate an encoded redirect link</h2>
-  <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
-  <button onclick="generateLink()">Generate</button>
-  <div id="generated" style="margin-top:12px;"></div>
-</div>
-
-<div id="verify-screen">
-  <div id="verify-box">
-    <h2>Verify to Continue</h2>
-    <div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
-    <button id="continueBtn" disabled>Waiting for verification...</button>
+  <!-- Generator section -->
+  <div id="generator" class="section" style="display:none;">
+    <h2>Generate an encoded redirect link</h2>
+    <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
+    <button onclick="generateLink()">Generate</button>
+    <div id="generated" style="margin-top:12px;"></div>
   </div>
-</div>
+
+  <!-- Verification screen -->
+  <div id="verify-screen">
+    <div id="verify-box">
+      <h2>Verify to Continue</h2>
+      <div class="cf-turnstile"
+           data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL"
+           data-callback="onTurnstileSuccess"></div>
+      <button id="continueBtn" disabled>Waiting for verification...</button>
+    </div>
+  </div>
+
+<script>
+  // ----- CONFIG -----
+  const CONFIG = {
+    PUBLIC_HOST: window.location.origin + '/gen.html',
+    // Secret keys per link are auto-generated
+    SECRET_KEY: crypto.getRandomValues(new Uint8Array(32)),  // AES key
+    HMAC_KEY: crypto.getRandomValues(new Uint8Array(32)),    // HMAC key
+    TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',
+    TURNSTILE_SECRET: '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4'
+  };
+
+  function safeBtoa(str){ try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str)));} }
+  function safeAtob(s){ try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;}} }
+  function uuid(){ if(crypto.randomUUID) return crypto.randomUUID(); return 'id-'+Math.random().toString(36).slice(2,12); }
+
+  // ----- MAIN -----
+  window.addEventListener('DOMContentLoaded',()=>{
+    const params=new URLSearchParams(location.search);
+    const w=params.get('w');
+    if(!w){
+      document.getElementById('generator').style.display='block';
+      return;
+    }
+
+    // --- VERIFY SCREEN FLOW ---
+    const decoded=safeAtob(decodeURIComponent(w));
+    let payload;
+    try{payload=JSON.parse(decoded);}catch(e){payload={u:decoded};}
+    if(!payload||!payload.u){
+      document.body.innerHTML='<p style="text-align:center;color:red;">Invalid or malformed link.</p>';
+      return;
+    }
+
+    const dest=payload.u;
+    document.getElementById('verify-screen').style.display='flex';
+    const btn=document.getElementById('continueBtn');
+    let verified=false;
+
+    // Called when Cloudflare CAPTCHA solved
+    window.onTurnstileSuccess=function(token){
+      verified=true;
+      btn.disabled=false;
+      btn.textContent='Continue';
+    };
+
+    btn.addEventListener('click',()=>{
+      if(!verified){
+        alert('Please complete the verification first.');
+        return;
+      }
+      btn.disabled=true;
+      btn.textContent='Redirecting...';
+      setTimeout(()=>window.location.href=dest,500);
+    });
+  });
+
+  // ----- LINK GENERATION -----
+  function generateLink(){
+    const dest=document.getElementById('targetInput').value.trim();
+    if(!dest) return alert('Enter a destination URL.');
+    const payload={u:dest,r:uuid(),t:Date.now()};
+    const encoded=safeBtoa(JSON.stringify(payload));
+    const final=`${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encoded)}`;
+    document.getElementById('generated').innerHTML=
+      `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
+  }
+</script>
 
 </body>
 </html>
