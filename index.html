@@ -1,18 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-
-<script>
-const pageTitles = [
-  "Explore New Horizons","Hidden Journey","Mystery Path","Secret Portal",
-  "Adventure Awaits","The Unknown","Secret Passage","Lost Trail",
-  "Enchanted Gateway","Whispering Woods"
-];
-document.title = pageTitles[Math.floor(Math.random()*pageTitles.length)];
-</script>
-
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Loading...</title>
 <style>
 html,body {height:100%;margin:0;padding:0;font-family:Arial,sans-serif;background:#f8f9fa;color:#111;}
 .section {border:1px solid #e0e0e0;padding:14px;border-radius:8px;margin:18px auto;max-width:960px;background:#fff;}
@@ -24,108 +15,92 @@ button {padding:8px 12px;border-radius:6px;border:0;background:#0366d6;color:#ff
 h2 {font-weight:500;margin-bottom:14px;}
 </style>
 
+<!-- Cloudflare Turnstile -->
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
-<body>
-
-<div id="generator" class="section" style="display:none;">
-  <h2>Generate an encoded redirect link</h2>
-  <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
-  <button onclick="generateLink()">Generate</button>
-  <div id="generated" style="margin-top:12px;"></div>
-</div>
-
-<div id="verify-screen">
-  <div id="verify-box">
-    <h2>Verify to Continue</h2>
-    <div class="cf-turnstile"
-         data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL"
-         data-callback="onTurnstileSuccess"></div>
-    <button id="continueBtn" disabled>Waiting for verification...</button>
-  </div>
-</div>
-
 <script>
+// --- CONFIG ---
 const CONFIG = {
-  // Automatically detect current HTML path
-  PUBLIC_HOST: window.location.href.split('?')[0],
-  TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',
-  TURNSTILE_SECRET: '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4'
+    PUBLIC_HOST: window.location.origin + '/index.html',
+    TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',   // YOUR SITE KEY
+    TURNSTILE_SECRET: '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4' // YOUR SECRET
 };
 
-// Helpers
+// --- UTILS ---
 function uuid(){return crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2,12);}
-function buf2b64(buf){return btoa(String.fromCharCode(...new Uint8Array(buf)));}
-function b642buf(str){return Uint8Array.from(atob(str),c=>c.charCodeAt(0));}
-function randomNoise(len){let a=new Uint8Array(len);crypto.getRandomValues(a);return buf2b64(a);}
+function safeBtoa(str){try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str)));}}
+function safeAtob(s){try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;}}}
 
-// AES + HMAC encrypt
-async function encryptPayload(plaintext){
-  const key = crypto.getRandomValues(new Uint8Array(32));
-  const cryptoKey = await crypto.subtle.importKey("raw",key,"AES-GCM",true,["encrypt"]);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const noise = randomNoise(16);
-  const payload = JSON.stringify({n:noise,d:plaintext});
-  const enc = new TextEncoder();
-  const ciphertext = await crypto.subtle.encrypt({name:"AES-GCM",iv},cryptoKey,enc.encode(payload));
-  const hmacKey = await crypto.subtle.importKey("raw",key,{name:"HMAC",hash:"SHA-256"},false,["sign"]);
-  const mac = await crypto.subtle.sign("HMAC",hmacKey,ciphertext);
-  return buf2b64(key)+'.'+buf2b64(iv)+'.'+buf2b64(ciphertext)+'.'+buf2b64(mac);
-}
+// --- RANDOM PAGE TITLE ---
+const pageTitles = [
+  "Explore New Horizons","Hidden Journey","Mystery Path","Secret Portal","Adventure Awaits",
+  "The Unknown","Secret Passage","Lost Trail","Enchanted Gateway","Whispering Woods"
+];
+document.title = pageTitles[Math.floor(Math.random()*pageTitles.length)];
 
-// AES + HMAC decrypt
-async function decryptPayload(blob){
-  try{
-    const [keyB64, ivB64, ctB64, macB64] = blob.split('.');
-    const key = b642buf(keyB64);
-    const iv = b642buf(ivB64);
-    const ct = b642buf(ctB64);
-    const mac = b642buf(macB64);
-    const hmacKey = await crypto.subtle.importKey("raw",key,{name:"HMAC",hash:"SHA-256"},false,["verify"]);
-    const valid = await crypto.subtle.verify("HMAC",hmacKey,mac,ct);
-    if(!valid) return null;
-    const cryptoKey = await crypto.subtle.importKey("raw",key,"AES-GCM",true,["decrypt"]);
-    const dec = await crypto.subtle.decrypt({name:"AES-GCM",iv},cryptoKey,ct);
-    const txt = new TextDecoder().decode(dec);
-    return JSON.parse(txt).d;
-  }catch(e){return null;}
-}
+// --- MAIN ---
+window.addEventListener('DOMContentLoaded',()=>{
+    const params = new URLSearchParams(location.search);
+    const w = params.get('w');
 
-window.addEventListener('DOMContentLoaded', async ()=>{
-  const params=new URLSearchParams(location.search);
-  const w=params.get('w');
-  if(!w){
-    document.getElementById('generator').style.display='block';
-    return;
-  }
+    if(!w){
+        // Show generator
+        document.getElementById('generator').style.display='block';
+        return;
+    }
 
-  const payload = await decryptPayload(decodeURIComponent(w));
-  if(!payload){
-    document.body.innerHTML='<p style="text-align:center;color:red;">Invalid or tampered link.</p>';
-    return;
-  }
+    // --- VERIFY SCREEN ---
+    const decoded = safeAtob(decodeURIComponent(w));
+    let payload;
+    try{payload=JSON.parse(decoded);}catch(e){payload={u:decoded};}
+    if(!payload || !payload.u){
+        document.body.innerHTML='<p style="text-align:center;color:red;">Invalid link.</p>';
+        return;
+    }
 
-  document.getElementById('verify-screen').style.display='flex';
-  const btn=document.getElementById('continueBtn');
-  let verified=false;
+    const dest = payload.u;
+    document.getElementById('verify-screen').style.display='flex';
 
-  window.onTurnstileSuccess=function(token){verified=true; btn.disabled=false; btn.textContent='Continue';};
-  btn.addEventListener('click',()=>{if(!verified){alert('Complete verification first');return;}
-    btn.disabled=true; btn.textContent='Redirecting...'; setTimeout(()=>window.location.href=payload,500);
-  });
+    window.onTurnstileSuccess = function(token){
+        // automatic redirect after captcha
+        window.location.href = dest;
+    };
 });
 
-// Link generator
-async function generateLink(){
-  const dest=document.getElementById('targetInput').value.trim();
-  if(!dest) return alert('Enter a destination URL.');
-  const payload={u:dest,r:uuid(),t:Date.now()};
-  const encrypted = await encryptPayload(JSON.stringify(payload));
-  const final = `${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encrypted)}`;
-  document.getElementById('generated').innerHTML=
-    `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
+// --- GENERATOR ---
+function generateLink(){
+    const dest = document.getElementById('targetInput').value.trim();
+    if(!dest) return alert('Enter a URL.');
+
+    const payload = {u:dest,r:uuid(),t:Date.now()};
+    const encoded = safeBtoa(JSON.stringify(payload));
+    const final = `${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encoded)}`;
+
+    document.getElementById('generated').innerHTML=
+        `<div><strong>Encrypted link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
 }
 </script>
+</head>
+<body>
+
+<!-- GENERATOR -->
+<div id="generator" class="section" style="display:none;">
+<h2>Generate encrypted redirect link</h2>
+<input id="targetInput" type="text" placeholder="Enter destination URL" />
+<button onclick="generateLink()">Generate</button>
+<div id="generated" style="margin-top:12px;"></div>
+<div style="margin-top:10px;color:#666;font-size:13px;">
+Links will use:<br/><code style="word-break:break-all;">${window.location.origin}/index.html</code>
+</div>
+</div>
+
+<!-- VERIFY SCREEN -->
+<div id="verify-screen">
+<div id="verify-box">
+<h2>Verify to Continue</h2>
+<div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
+</div>
+</div>
 
 </body>
 </html>
