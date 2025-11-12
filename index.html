@@ -3,121 +3,130 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Loading...</title>
+<title>Redirect Generator</title>
 <style>
-html,body {height:100%;margin:0;padding:0;font-family:Arial,sans-serif;background:#f8f9fa;color:#111;}
-.section {border:1px solid #e0e0e0;padding:14px;border-radius:8px;margin:18px auto;max-width:960px;background:#fff;}
-input[type="text"] {width:72%;padding:8px;border:1px solid #ccc;border-radius:4px;}
-button {padding:8px 12px;border-radius:6px;border:0;background:#0366d6;color:#fff;cursor:pointer;}
-.sample {word-break:break-all;color:#0366d6;text-decoration:none;}
-#verify-screen {display:none;align-items:center;justify-content:center;height:100vh;background:#f8f9fa;}
-#verify-box {background:#fff;padding:30px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.1);text-align:center;}
-h2 {font-weight:500;margin-bottom:14px;}
+  html,body {height:100%; margin:0; padding:0; font-family:Arial,sans-serif; background:#f8f9fa; color:#111;}
+  .section {border:1px solid #e0e0e0; padding:14px; border-radius:8px; margin:18px auto; max-width:960px; background:#fff;}
+  input[type="text"] {width:72%; padding:8px; border:1px solid #ccc; border-radius:4px;}
+  button {padding:8px 12px; border-radius:6px; border:0; background:#0366d6; color:#fff; cursor:pointer;}
+  .sample { word-break:break-all; color:#0366d6; text-decoration:none; }
+  #verify-screen {display:none; align-items:center; justify-content:center; height:100vh; background:#f8f9fa;}
+  #verify-box {background:#fff; padding:30px; border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.1); text-align:center;}
+  h2 { font-weight:500; margin-bottom:14px; }
 </style>
 
 <!-- Cloudflare Turnstile -->
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
 <script>
-// --- CONFIG ---
 const CONFIG = {
-    PUBLIC_HOST: window.location.origin + '/index.html',
-    TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',   // YOUR SITE KEY
-    TURNSTILE_SECRET: '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4' // YOUR SECRET
+  PUBLIC_HOST: window.location.origin + window.location.pathname,
+  TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',   // <<< YOUR SITE KEY
+  TURNSTILE_SECRET:   '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4' // <<< YOUR SECRET KEY
 };
 
-// --- UTILS ---
-function uuid(){return crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2,12);}
-function randomAESKey(){return crypto.getRandomValues(new Uint8Array(32));}
-function buf2hex(buf){return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');}
-function hex2buf(hex){const bytes=new Uint8Array(hex.length/2);for(let i=0;i<bytes.length;i++)bytes[i]=parseInt(hex.substr(i*2,2),16);return bytes;}
-function safeBtoa(str){return btoa(String.fromCharCode(...new Uint8Array(str)));}
-function safeAtob(base64){const bin=atob(base64);const buf=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)buf[i]=bin.charCodeAt(i);return buf;}
-
-// --- RANDOM PAGE TITLE ---
+// ---------------- Random Titles ----------------
 const pageTitles = [
-  "Explore New Horizons","Hidden Journey","Mystery Path","Secret Portal","Adventure Awaits",
-  "The Unknown","Secret Passage","Lost Trail","Enchanted Gateway","Whispering Woods"
+  "Explore New Horizons","Hidden Journey","Mystery Path","Secret Portal",
+  "Adventure Awaits","The Unknown","Secret Passage","Lost Trail",
+  "Enchanted Gateway","Whispering Woods"
 ];
 document.title = pageTitles[Math.floor(Math.random()*pageTitles.length)];
 
-// --- AES ENCRYPT/DECRYPT ---
-async function encryptPayload(payload){
-    const key = await crypto.subtle.generateKey({name:"AES-GCM",length:256},true,["encrypt","decrypt"]);
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const enc = new TextEncoder().encode(JSON.stringify(payload));
-    const cipher = await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc);
-    const rawKey = await crypto.subtle.exportKey("raw",key);
-    // Encode everything in Base64
-    return `${safeBtoa(rawKey)}.${safeBtoa(iv)}.${safeBtoa(cipher)}`;
+// ---------------- Crypto Utils ----------------
+function genRandomBytes(len){return crypto.getRandomValues(new Uint8Array(len));}
+function buf2hex(buf){return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');}
+function buf2b64(buf){return btoa(String.fromCharCode(...new Uint8Array(buf)));}
+function b642buf(str){return Uint8Array.from(atob(str),c=>c.charCodeAt(0));}
+
+// AES-GCM encrypt
+async function encryptPayload(payload) {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", genRandomBytes(32), {name:"PBKDF2"}, false, ["deriveKey"]
+  );
+  const salt = genRandomBytes(16);
+  const iv = genRandomBytes(12);
+  const enc = new TextEncoder();
+  const aesKey = await crypto.subtle.deriveKey(
+    {name:"PBKDF2", salt, iterations:100000, hash:"SHA-256", info:enc.encode("aes-key") },
+    keyMaterial, { name:"AES-GCM", length:256 }, true, ["encrypt"]
+  );
+  const cipher = await crypto.subtle.encrypt({name:"AES-GCM", iv}, aesKey, enc.encode(payload));
+  return buf2b64(salt) + "." + buf2b64(iv) + "." + buf2b64(cipher);
 }
 
-async function decryptPayload(blob){
-    const [keyB64, ivB64, cipherB64] = blob.split('.');
-    if(!keyB64 || !ivB64 || !cipherB64) return null;
-    const keyBuf = safeAtob(keyB64);
-    const iv = safeAtob(ivB64);
-    const cipher = safeAtob(cipherB64);
-    const key = await crypto.subtle.importKey("raw",keyBuf,{name:"AES-GCM"},true,["decrypt"]);
-    const decrypted = await crypto.subtle.decrypt({name:"AES-GCM",iv},key,cipher);
-    return JSON.parse(new TextDecoder().decode(decrypted));
+// AES-GCM decrypt
+async function decryptPayload(blob) {
+  try {
+    const [saltB64, ivB64, cipherB64] = blob.split(".");
+    const keyMaterial = await crypto.subtle.importKey("raw", genRandomBytes(32), {name:"PBKDF2"}, false, ["deriveKey"]);
+    const salt = b642buf(saltB64);
+    const iv = b642buf(ivB64);
+    const cipher = b642buf(cipherB64);
+    const enc = new TextDecoder();
+    const aesKey = await crypto.subtle.deriveKey(
+      {name:"PBKDF2", salt, iterations:100000, hash:"SHA-256", info: new TextEncoder().encode("aes-key")},
+      keyMaterial, {name:"AES-GCM", length:256}, true, ["decrypt"]
+    );
+    const plain = await crypto.subtle.decrypt({name:"AES-GCM", iv}, aesKey, cipher);
+    return enc.decode(plain);
+  } catch(e){return null;}
 }
 
-// --- MAIN ---
-window.addEventListener('DOMContentLoaded',async ()=>{
-    const params = new URLSearchParams(location.search);
-    const w = params.get('w');
+// UUID
+function uuid(){ return crypto.randomUUID?crypto.randomUUID():'id-'+Math.random().toString(36).slice(2,12); }
 
-    if(!w){
-        document.getElementById('generator').style.display='block';
-        return;
-    }
+// ---------------- DOM Handling ----------------
+window.addEventListener('DOMContentLoaded', async ()=>{
+  const params=new URLSearchParams(location.search);
+  const w=params.get('w');
+  if(!w){ document.getElementById('generator').style.display='block'; return; }
 
-    // --- VERIFY SCREEN ---
-    document.getElementById('verify-screen').style.display='flex';
-    window.onTurnstileSuccess = async function(token){
-        try{
-            const payload = await decryptPayload(decodeURIComponent(w));
-            if(!payload || !payload.u) throw "Invalid";
-            window.location.href = payload.u;
-        }catch(e){
-            document.body.innerHTML='<p style="text-align:center;color:red;">Invalid or corrupted link.</p>';
-        }
-    };
+  const verifyScreen=document.getElementById('verify-screen');
+  verifyScreen.style.display='flex';
+  const btn=document.getElementById('continueBtn');
+  let verified=false;
+
+  window.onTurnstileSuccess=function(token){ verified=true; btn.disabled=false; btn.textContent='Continue'; };
+
+  btn.addEventListener('click',()=>{
+    if(!verified){ alert('Please complete the verification first.'); return; }
+    btn.disabled=true; btn.textContent='Redirecting...';
+    try{ const decoded=atob(decodeURIComponent(w)); const payload=JSON.parse(decoded); window.location.href=payload.u; }
+    catch(e){ alert('Invalid link.'); }
+  });
 });
 
-// --- GENERATOR ---
+// ---------------- Link Generator ----------------
 async function generateLink(){
-    const dest = document.getElementById('targetInput').value.trim();
-    if(!dest) return alert('Enter a URL.');
-
-    const payload = {u:dest,r:uuid(),t:Date.now()};
-    const encrypted = await encryptPayload(payload);
-    const final = `${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encrypted)}`;
-    document.getElementById('generated').innerHTML=
-        `<div><strong>Encrypted link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
+  const dest=document.getElementById('targetInput').value.trim();
+  if(!dest) return alert('Enter a destination URL.');
+  const payload=JSON.stringify({u:dest,r:uuid(),t:Date.now()});
+  const encrypted=await encryptPayload(payload);
+  const final=`${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encrypted)}`;
+  document.getElementById('generated').innerHTML=`<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
 }
 </script>
 </head>
 <body>
 
-<!-- GENERATOR -->
 <div id="generator" class="section" style="display:none;">
-<h2>Generate encrypted redirect link</h2>
-<input id="targetInput" type="text" placeholder="Enter destination URL" />
-<button onclick="generateLink()">Generate</button>
-<div id="generated" style="margin-top:12px;"></div>
-<div style="margin-top:10px;color:#666;font-size:13px;">
-Links will use:<br/><code style="word-break:break-all;">${window.location.origin}/index.html</code>
-</div>
+  <h2>Generate an encoded redirect link</h2>
+  <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
+  <button onclick="generateLink()">Generate</button>
+  <div id="generated" style="margin-top:12px;"></div>
+  <div style="margin-top:10px;color:#666;font-size:13px;">
+    All generated links will start with:<br/>
+    <code style="word-break:break-all;">${window.location.origin}${window.location.pathname}</code>
+  </div>
 </div>
 
-<!-- VERIFY SCREEN -->
 <div id="verify-screen">
-<div id="verify-box">
-<h2>Verify to Continue</h2>
-<div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
-</div>
+  <div id="verify-box">
+    <h2>Verify to Continue</h2>
+    <div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
+    <button id="continueBtn" disabled>Waiting for verification...</button>
+  </div>
 </div>
 
 </body>
