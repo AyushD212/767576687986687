@@ -47,7 +47,8 @@ h2 {font-weight:500;margin-bottom:14px;}
 
 <script>
 const CONFIG = {
-  PUBLIC_HOST: window.location.origin + '/gen.html',
+  // Automatically detect current HTML path
+  PUBLIC_HOST: window.location.href.split('?')[0],
   TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',
   TURNSTILE_SECRET: '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4'
 };
@@ -63,15 +64,12 @@ async function encryptPayload(plaintext){
   const key = crypto.getRandomValues(new Uint8Array(32));
   const cryptoKey = await crypto.subtle.importKey("raw",key,"AES-GCM",true,["encrypt"]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  // add random padding to plaintext
   const noise = randomNoise(16);
   const payload = JSON.stringify({n:noise,d:plaintext});
   const enc = new TextEncoder();
   const ciphertext = await crypto.subtle.encrypt({name:"AES-GCM",iv},cryptoKey,enc.encode(payload));
-  // HMAC
   const hmacKey = await crypto.subtle.importKey("raw",key,{name:"HMAC",hash:"SHA-256"},false,["sign"]);
   const mac = await crypto.subtle.sign("HMAC",hmacKey,ciphertext);
-  // Encode everything
   return buf2b64(key)+'.'+buf2b64(iv)+'.'+buf2b64(ciphertext)+'.'+buf2b64(mac);
 }
 
@@ -83,7 +81,6 @@ async function decryptPayload(blob){
     const iv = b642buf(ivB64);
     const ct = b642buf(ctB64);
     const mac = b642buf(macB64);
-    // verify HMAC
     const hmacKey = await crypto.subtle.importKey("raw",key,{name:"HMAC",hash:"SHA-256"},false,["verify"]);
     const valid = await crypto.subtle.verify("HMAC",hmacKey,mac,ct);
     if(!valid) return null;
