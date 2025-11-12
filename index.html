@@ -39,35 +39,43 @@ h2 { font-weight:500; margin-bottom:14px; }
 <script>
 // ------------------ CONFIG ------------------
 const CONFIG = {
-  PUBLIC_HOST: window.location.origin + '/',
-  TURNSTILE_SITE_KEY: 'YOUR_TURNSTILE_SITE_KEY', // <--- replace with your key
+  PUBLIC_HOST: window.location.origin + '/gen.html',
+  TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL', // your Turnstile Site Key
+  TURNSTILE_SECRET:   '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4' // your Turnstile Secret Key
 };
+
+// ------------------ RANDOM PAGE TITLES ------------------
+const pageTitles = [
+  "Explore New Horizons",
+  "Hidden Journey",
+  "Mystery Path",
+  "Secret Portal",
+  "Adventure Awaits",
+  "The Unknown",
+  "Secret Passage",
+  "Lost Trail",
+  "Enchanted Gateway",
+  "Whispering Woods"
+];
+function getRandomTitle() { return pageTitles[Math.floor(Math.random() * pageTitles.length)]; }
+document.title = getRandomTitle();
 
 // ------------------ CRYPTO UTILITIES ------------------
 function safeBtoa(str){ try{return btoa(str);}catch(e){return btoa(unescape(encodeURIComponent(str))); } }
 function safeAtob(s){ try{return atob(s);}catch(e){try{return decodeURIComponent(escape(atob(s)));}catch(e2){return null;} } }
 function uuid(){ return crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2,12); }
-function generateRandomWords(count=3){
-  const words=["forest","river","mountain","star","moon","cloud","leaf","stone","sun","wave","sky","tree","spark","crystal"];
-  let result=[];
-  for(let i=0;i<count;i++) result.push(words[Math.floor(Math.random()*words.length)] + '-' + Math.random().toString(36).slice(2,3));
-  return result.join('-');
-}
 
 // ------------------ LINK GENERATION ------------------
 function generateLink(){
   const dest=document.getElementById('targetInput').value.trim();
   if(!dest) return alert('Enter a destination URL.');
 
-  // Auto-generate per-link secret
   const SECRET_KEY=crypto.getRandomValues(new Uint8Array(32));
   const HMAC_KEY=crypto.getRandomValues(new Uint8Array(32));
 
   const payload={u:dest,r:uuid(),t:Date.now(),s:Array.from(SECRET_KEY),h:Array.from(HMAC_KEY)};
   const encoded=safeBtoa(JSON.stringify(payload));
-
-  const randomHash=generateRandomWords();
-  const final=`${CONFIG.PUBLIC_HOST}#${randomHash}-${encoded}`;
+  const final=`${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encoded)}`;
 
   document.getElementById('generated').innerHTML=
     `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
@@ -75,16 +83,13 @@ function generateLink(){
 
 // ------------------ VERIFY FLOW ------------------
 window.addEventListener('DOMContentLoaded',()=>{
-  if(!location.hash){ document.getElementById('generator').style.display='block'; return; }
+  const params=new URLSearchParams(location.search);
+  const w=params.get('w');
+  if(!w){ document.getElementById('generator').style.display='block'; return; }
 
-  const hashContent=location.hash.slice(1); // remove #
-  const lastDash=hashContent.lastIndexOf('-'); // find encoded payload
-  if(lastDash===-1){ document.body.innerHTML='<p style="text-align:center;color:red;">Invalid link.</p>'; return; }
-
-  const encoded=hashContent.slice(lastDash+1);
-  const decoded=safeAtob(decodeURIComponent(encoded));
+  const decoded=safeAtob(decodeURIComponent(w));
   let payload;
-  try{ payload=JSON.parse(decoded); }catch(e){ payload={u:decoded}; }
+  try{payload=JSON.parse(decoded);}catch(e){payload={u:decoded};}
   if(!payload||!payload.u){ document.body.innerHTML='<p style="text-align:center;color:red;">Invalid or malformed link.</p>'; return; }
 
   const dest=payload.u;
@@ -105,9 +110,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     setTimeout(()=>window.location.href=dest,500);
   });
 
-  // Random page title
-  const titles=["Explore New Horizons","Hidden Journey","Mystery Path","Secret Portal","Adventure Awaits","The Unknown"];
-  document.title=titles[Math.floor(Math.random()*titles.length)];
+  document.title = getRandomTitle();
 });
 </script>
 </head>
@@ -123,7 +126,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 <div id="verify-screen">
   <div id="verify-box">
     <h2>Verify to Continue</h2>
-    <div class="cf-turnstile" data-sitekey="YOUR_TURNSTILE_SITE_KEY" data-callback="onTurnstileSuccess"></div>
+    <div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
     <button id="continueBtn" disabled>Waiting for verification...</button>
   </div>
 </div>
