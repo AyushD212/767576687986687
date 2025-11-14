@@ -4,161 +4,323 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Encrypted Link Generator</title>
+
 <style>
-html,body{height:100%;margin:0;padding:0;font-family:Arial,sans-serif;background:#f8f9fa;color:#111;}
-.section{border:1px solid #e0e0e0;padding:14px;border-radius:8px;margin:18px auto;max-width:960px;background:#fff;}
-input[type="text"]{width:70%;padding:8px;border:1px solid #ccc;border-radius:4px;}
-button{padding:8px 12px;border-radius:6px;border:0;background:#0366d6;color:#fff;cursor:pointer;margin:4px;}
-.sample{word-break:break-all;color:#0366d6;text-decoration:none;}
-.spinner{border:6px solid #f3f3f3;border-top:6px solid #0366d6;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:0 auto;}
-@keyframes spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+html,body{
+    height:100%;
+    margin:0;
+    padding:0;
+    font-family:Arial,sans-serif;
+    background:#f8f9fa;
+    color:#111;
+}
+.section{
+    border:1px solid #e0e0e0;
+    padding:14px;
+    border-radius:8px;
+    margin:18px auto;
+    max-width:960px;
+    background:#fff;
+}
+input[type="text"]{
+    width:70%;
+    padding:8px;
+    border:1px solid #ccc;
+    border-radius:4px;
+}
+button{
+    padding:8px 12px;
+    border-radius:6px;
+    border:0;
+    background:#0366d6;
+    color:#fff;
+    cursor:pointer;
+    margin:4px;
+}
+.sample{
+    word-break:break-all;
+    color:#0366d6;
+    text-decoration:none;
+}
 </style>
+
 <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
 <script>
+/* -----------------------------------------------------------
+   CONFIG
+----------------------------------------------------------- */
 const CONFIG = {
-    PUBLIC_HOST: window.location.origin + window.location.pathname,
-    TURNSTILE_SITE_KEY:'0x4AAAAAAB_GRO5x_mAh22NL'
+    PUBLIC_HOST: window.location.origin + window.location.pathname
 };
 
-function uuid(){ return crypto.randomUUID ? crypto.randomUUID() : 'id-'+Math.random().toString(36).slice(2,12); }
+/* -----------------------------------------------------------
+   Utilities
+----------------------------------------------------------- */
+function uuid(){
+    return crypto.randomUUID
+        ? crypto.randomUUID()
+        : "id-" + Math.random().toString(36).slice(2,12);
+}
 
 function arrayBufferToBase64(buffer){
-    let binary=''; const bytes=new Uint8Array(buffer);
-    for(let i=0;i<bytes.byteLength;i++) binary+=String.fromCharCode(bytes[i]);
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    for(let i=0;i<bytes.byteLength;i++){
+        binary += String.fromCharCode(bytes[i]);
+    }
     return btoa(binary);
 }
+
 function base64ToArrayBuffer(base64){
-    const binary=atob(base64); const bytes=new Uint8Array(binary.length);
-    for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++){
+        bytes[i] = binary.charCodeAt(i);
+    }
     return bytes.buffer;
 }
 
-async function generateAESKey(){ return crypto.subtle.generateKey({name:"AES-GCM", length:256}, true, ["encrypt","decrypt"]); }
+/* -----------------------------------------------------------
+   AES Encryption
+----------------------------------------------------------- */
+async function generateAESKey(){
+    return crypto.subtle.generateKey(
+        { name:"AES-GCM", length:256 },
+        true,
+        ["encrypt","decrypt"]
+    );
+}
 
 async function encryptPayload(payload){
     const key = await generateAESKey();
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const encoded = new TextEncoder().encode(JSON.stringify(payload));
-    const encrypted = await crypto.subtle.encrypt({name:"AES-GCM", iv}, key, encoded);
+
+    const encrypted = await crypto.subtle.encrypt(
+        { name:"AES-GCM", iv },
+        key,
+        encoded
+    );
+
     const rawKey = await crypto.subtle.exportKey("raw", key);
-    return arrayBufferToBase64(encrypted) + '.' + arrayBufferToBase64(iv) + '.' + arrayBufferToBase64(rawKey);
+
+    return arrayBufferToBase64(encrypted)
+        + "." + arrayBufferToBase64(iv)
+        + "." + arrayBufferToBase64(rawKey);
 }
 
-async function decryptPayload(encStr){
-    try{
-        const [encryptedB64, ivB64, keyB64] = encStr.split('.');
-        const encrypted = base64ToArrayBuffer(encryptedB64);
-        const iv = base64ToArrayBuffer(ivB64);
-        const keyRaw = base64ToArrayBuffer(keyB64);
-        const key = await crypto.subtle.importKey("raw", keyRaw, "AES-GCM", true, ["decrypt"]);
-        const decrypted = await crypto.subtle.decrypt({name:"AES-GCM", iv}, key, encrypted);
-        return JSON.parse(new TextDecoder().decode(decrypted));
-    }catch(e){ return null; }
+/* -----------------------------------------------------------
+   Random Titles
+----------------------------------------------------------- */
+const pageTitles = [
+    "Explore New Horizons","Hidden Journey","Mystery Path","Secret Portal",
+    "Adventure Awaits","The Unknown","Secret Passage","Lost Trail",
+    "Enchanted Gateway","Whispering Woods"
+];
+
+function randomFilename(ext){
+    return uuid() + "." + ext;
 }
 
-// --------------------- Auto titles ---------------------
-const pageTitles=["Explore New Horizons","Hidden Journey","Mystery Path","Secret Portal","Adventure Awaits","The Unknown","Secret Passage","Lost Trail","Enchanted Gateway","Whispering Woods"];
-
-// --------------------- Generate files ---------------------
-function randomFilename(ext){ return uuid() + '.' + ext; }
-
+/* -----------------------------------------------------------
+   Generate HTML
+----------------------------------------------------------- */
 function generateHTML(encData){
-    const title=pageTitles[Math.floor(Math.random()*pageTitles.length)];
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${title}</title>
-<style>body{display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial} .spinner{border:6px solid #f3f3f3;border-top:6px solid #0366d6;border-radius:50%;width:50px;height:50px;animation:spin 1s linear infinite;}@keyframes spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}</style>
-</head><body><div class="spinner"></div>
+    const title = pageTitles[Math.floor(Math.random()*pageTitles.length)];
+
+    return `
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>${title}</title>
+<style>
+body{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height:100vh;
+    font-family:Arial;
+}
+.spinner{
+    border:6px solid #f3f3f3;
+    border-top:6px solid #0366d6;
+    border-radius:50%;
+    width:50px;
+    height:50px;
+    animation:spin 1s linear infinite;
+}
+@keyframes spin{
+    0%{transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+}
+</style>
+</head><body>
+
+<div class="spinner"></div>
+
 <script>
 (async()=>{
-    const encStr='${encData}';
-    function arrayBufferToBase64(buffer){let binary=''; const bytes=new Uint8Array(buffer); for(let i=0;i<bytes.byteLength;i++) binary+=String.fromCharCode(bytes[i]); return btoa(binary);}
-    function base64ToArrayBuffer(base64){const binary=atob(base64); const bytes=new Uint8Array(binary.length); for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i); return bytes.buffer;}
-    async function decryptPayload(encStr){
-        try{
-            const [encryptedB64, ivB64, keyB64]=encStr.split('.');
-            const encrypted=base64ToArrayBuffer(encryptedB64);
-            const iv=base64ToArrayBuffer(ivB64);
-            const keyRaw=base64ToArrayBuffer(keyB64);
-            const key=await crypto.subtle.importKey('raw',keyRaw,'AES-GCM',true,['decrypt']);
-            const decrypted=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,encrypted);
-            return JSON.parse(new TextDecoder().decode(decrypted));
-        }catch(e){return null;}
+    const encStr = "${encData}";
+
+    function base64ToArrayBuffer(b){
+        const bin = atob(b);
+        const bytes = new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+        return bytes.buffer;
     }
-    const payload=await decryptPayload(encStr);
-    if(payload && payload.u){window.location.href=payload.u;}
+
+    async function decryptPayload(str){
+        try{
+            const [e,iv,k] = str.split(".");
+            const encrypted = base64ToArrayBuffer(e);
+            const ivbuf = base64ToArrayBuffer(iv);
+            const keybuf = base64ToArrayBuffer(k);
+
+            const key = await crypto.subtle.importKey(
+                "raw", keybuf, "AES-GCM", true, ["decrypt"]
+            );
+
+            const decrypted = await crypto.subtle.decrypt(
+                { name:"AES-GCM", iv:ivbuf },
+                key,
+                encrypted
+            );
+            return JSON.parse(new TextDecoder().decode(decrypted));
+        }catch(err){ return null; }
+    }
+
+    const payload = await decryptPayload(encStr);
+    if(payload && payload.u) window.location.href = payload.u;
 })();
-</script></body></html>`;
+<\/script>
+
+</body></html>`;
 }
 
+/* -----------------------------------------------------------
+   Generate SVG
+----------------------------------------------------------- */
 function generateSVG(encData){
-    const title=pageTitles[Math.floor(Math.random()*pageTitles.length)];
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50">
+    const title = pageTitles[Math.floor(Math.random()*pageTitles.length)];
+
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50">
 <rect width="100%" height="100%" fill="#eef"/>
 <text x="10" y="30" font-size="14">${title}</text>
+
 <script type="application/ecmascript"><![CDATA[
 (async()=>{
-    const encStr='${encData}';
-    function base64ToArrayBuffer(base64){const binary=atob(base64); const bytes=new Uint8Array(binary.length); for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i); return bytes.buffer;}
-    async function decryptPayload(encStr){
-        try{
-            const [encryptedB64, ivB64, keyB64]=encStr.split('.');
-            const encrypted=base64ToArrayBuffer(encryptedB64);
-            const iv=base64ToArrayBuffer(ivB64);
-            const keyRaw=base64ToArrayBuffer(keyB64);
-            const key=await crypto.subtle.importKey('raw',keyRaw,'AES-GCM',true,['decrypt']);
-            const decrypted=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,encrypted);
-            return JSON.parse(new TextDecoder().decode(decrypted));
-        }catch(e){return null;}
+    const encStr = "${encData}";
+
+    function base64ToArrayBuffer(b){
+        const bin = atob(b);
+        const bytes = new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+        return bytes.buffer;
     }
-    const payload=await decryptPayload(encStr);
-    if(payload && payload.u){window.location.href=payload.u;}
+
+    async function decryptPayload(str){
+        try{
+            const [e,iv,k] = str.split(".");
+            const encrypted = base64ToArrayBuffer(e);
+            const ivbuf = base64ToArrayBuffer(iv);
+            const keybuf = base64ToArrayBuffer(k);
+
+            const key = await crypto.subtle.importKey(
+                "raw", keybuf, "AES-GCM", true, ["decrypt"]
+            );
+
+            const decrypted = await crypto.subtle.decrypt(
+                { name:"AES-GCM", iv:ivbuf },
+                key,
+                encrypted
+            );
+
+            return JSON.parse(new TextDecoder().decode(decrypted));
+        }catch(err){ return null; }
+    }
+
+    const payload = await decryptPayload(encStr);
+    if(payload && payload.u) window.location.href = payload.u;
+
 })();
-]]></script>
+]]><\/script>
+
 </svg>`;
 }
 
+/* -----------------------------------------------------------
+   QR Code
+----------------------------------------------------------- */
 async function generateQRCodeSVG(link){
-    return await QRCode.toString(link,{type:'svg',width:128});
+    return await QRCode.toString(link, { type:"svg", width:128 });
 }
 
-function downloadFile(filename,content,type){
-    const blob=new Blob([content],{type});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=filename;
+/* -----------------------------------------------------------
+   Download helper
+----------------------------------------------------------- */
+function downloadFile(filename, content, type){
+    const blob = new Blob([content], {type});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
     a.click();
 }
 
-// --------------------- Generator ---------------------
+/* -----------------------------------------------------------
+   MAIN GENERATOR
+----------------------------------------------------------- */
 async function generateLink(){
-    const dest=document.getElementById('targetInput').value.trim();
-    if(!dest){alert('Enter destination URL.'); return;}
-    const payload={u:dest,r:uuid(),t:Date.now()};
-    const layer1=await encryptPayload(payload);
-    const layer2=await encryptPayload({data:layer1});
-    const finalUrl=`${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(layer2)}`;
+    const dest = document.getElementById("targetInput").value.trim();
+    if(!dest){
+        alert("Enter destination URL.");
+        return;
+    }
 
-    const htmlFile=generateHTML(layer2);
-    const svgFile=generateSVG(layer2);
-    const qrFile=await generateQRCodeSVG(finalUrl);
+    const payload = { u:dest, r:uuid(), t:Date.now() };
+    const layer1 = await encryptPayload(payload);
+    const layer2 = await encryptPayload({ data: layer1 });
 
-    document.getElementById('generated').innerHTML=`
-        <button onclick='downloadFile("${randomFilename('html')}", \`${htmlFile}\`, "text/html")'>Download HTML</button>
-        <button onclick='downloadFile("${randomFilename('svg')}", \`${svgFile}\`, "image/svg+xml")'>Download SVG</button>
-        <button onclick='downloadFile("${randomFilename('svg')}", \`${qrFile}\`, "image/svg+xml")'>Download QR</button>
-        <div style="margin-top:10px;">Final link:<br/><a class="sample" href="${finalUrl}" target="_blank">${finalUrl}</a></div>
+    const finalUrl = CONFIG.PUBLIC_HOST + "?w=" + encodeURIComponent(layer2);
+
+    const htmlData = generateHTML(layer2);
+    const svgData = generateSVG(layer2);
+    const qrData  = await generateQRCodeSVG(finalUrl);
+
+    const wrapper = document.getElementById("generated");
+
+    wrapper.innerHTML = `
+        <button id="d-html">Download HTML</button>
+        <button id="d-svg">Download SVG</button>
+        <button id="d-qr">Download QR</button>
+
+        <div style="margin-top:12px;">
+            Final link:<br/>
+            <a class="sample" href="${finalUrl}" target="_blank">${finalUrl}</a>
+        </div>
     `;
-}
 
+    document.getElementById("d-html").onclick = () =>
+        downloadFile(randomFilename("html"), htmlData, "text/html");
+
+    document.getElementById("d-svg").onclick = () =>
+        downloadFile(randomFilename("svg"), svgData, "image/svg+xml");
+
+    document.getElementById("d-qr").onclick = () =>
+        downloadFile(randomFilename("svg"), qrData, "image/svg+xml");
+}
 </script>
+
 </head>
 <body>
+
 <div class="section">
 <h2>Encrypted Link Generator</h2>
+
 <input id="targetInput" type="text" placeholder="Enter destination URL e.g. https://example.com"/>
 <button onclick="generateLink()">Generate</button>
+
 <div id="generated" style="margin-top:12px;"></div>
 </div>
+
 </body>
 </html>
