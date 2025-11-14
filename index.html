@@ -48,11 +48,9 @@ button{
 
 <script>
 /* -----------------------------------------------------------
-   CONFIG
+   BASE URL
 ----------------------------------------------------------- */
-const CONFIG = {
-    PUBLIC_HOST: window.location.origin + window.location.pathname
-};
+const BASE_URL = window.location.origin + window.location.pathname;
 
 /* -----------------------------------------------------------
    Utilities
@@ -66,18 +64,16 @@ function uuid(){
 function arrayBufferToBase64(buffer){
     let binary = "";
     const bytes = new Uint8Array(buffer);
-    for(let i=0;i<bytes.byteLength;i++){
+    for(let i=0;i<bytes.byteLength;i++)
         binary += String.fromCharCode(bytes[i]);
-    }
     return btoa(binary);
 }
 
 function base64ToArrayBuffer(base64){
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
-    for(let i=0;i<binary.length;i++){
+    for(let i=0;i<binary.length;i++)
         bytes[i] = binary.charCodeAt(i);
-    }
     return bytes.buffer;
 }
 
@@ -96,18 +92,18 @@ async function encryptPayload(payload){
     const key = await generateAESKey();
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const encoded = new TextEncoder().encode(JSON.stringify(payload));
-
     const encrypted = await crypto.subtle.encrypt(
         { name:"AES-GCM", iv },
         key,
         encoded
     );
-
     const rawKey = await crypto.subtle.exportKey("raw", key);
 
-    return arrayBufferToBase64(encrypted)
+    return (
+        arrayBufferToBase64(encrypted)
         + "." + arrayBufferToBase64(iv)
-        + "." + arrayBufferToBase64(rawKey);
+        + "." + arrayBufferToBase64(rawKey)
+    );
 }
 
 /* -----------------------------------------------------------
@@ -118,13 +114,10 @@ const pageTitles = [
     "Adventure Awaits","The Unknown","Secret Passage","Lost Trail",
     "Enchanted Gateway","Whispering Woods"
 ];
-
-function randomFilename(ext){
-    return uuid() + "." + ext;
-}
+function randomFilename(ext){ return uuid() + "." + ext; }
 
 /* -----------------------------------------------------------
-   Generate HTML
+   Generate HTML redirect file
 ----------------------------------------------------------- */
 function generateHTML(encData){
     const title = pageTitles[Math.floor(Math.random()*pageTitles.length)];
@@ -154,7 +147,6 @@ body{
 }
 </style>
 </head><body>
-
 <div class="spinner"></div>
 
 <script>
@@ -197,7 +189,7 @@ body{
 }
 
 /* -----------------------------------------------------------
-   Generate SVG
+   Generate SVG redirect file
 ----------------------------------------------------------- */
 function generateSVG(encData){
     const title = pageTitles[Math.floor(Math.random()*pageTitles.length)];
@@ -234,7 +226,6 @@ function generateSVG(encData){
                 key,
                 encrypted
             );
-
             return JSON.parse(new TextDecoder().decode(decrypted));
         }catch(err){ return null; }
     }
@@ -244,7 +235,6 @@ function generateSVG(encData){
 
 })();
 ]]><\/script>
-
 </svg>`;
 }
 
@@ -267,7 +257,7 @@ function downloadFile(filename, content, type){
 }
 
 /* -----------------------------------------------------------
-   MAIN GENERATOR
+   Main Generate Function
 ----------------------------------------------------------- */
 async function generateLink(){
     const dest = document.getElementById("targetInput").value.trim();
@@ -278,20 +268,23 @@ async function generateLink(){
 
     const payload = { u:dest, r:uuid(), t:Date.now() };
     const layer1 = await encryptPayload(payload);
-    const layer2 = await encryptPayload({ data: layer1 });
+    const layer2 = await encryptPayload({ data:layer1 });
 
-    const finalUrl = CONFIG.PUBLIC_HOST + "?w=" + encodeURIComponent(layer2);
+    const finalUrl = BASE_URL + "?w=" + encodeURIComponent(layer2);
 
-    const htmlData = generateHTML(layer2);
-    const svgData = generateSVG(layer2);
-    const qrData  = await generateQRCodeSVG(finalUrl);
+    const html = generateHTML(layer2);
+    const svg  = generateSVG(layer2);
+    const qr   = await generateQRCodeSVG(finalUrl);
 
-    const wrapper = document.getElementById("generated");
+    const out = document.getElementById("generated");
 
-    wrapper.innerHTML = `
-        <button id="d-html">Download HTML</button>
-        <button id="d-svg">Download SVG</button>
-        <button id="d-qr">Download QR</button>
+    out.innerHTML = `
+        <p>All generated links start with:<br>
+        <strong>${BASE_URL}</strong></p>
+
+        <button id="dl-html">Download HTML</button>
+        <button id="dl-svg">Download SVG</button>
+        <button id="dl-qr">Download QR</button>
 
         <div style="margin-top:12px;">
             Final link:<br/>
@@ -299,14 +292,14 @@ async function generateLink(){
         </div>
     `;
 
-    document.getElementById("d-html").onclick = () =>
-        downloadFile(randomFilename("html"), htmlData, "text/html");
+    document.getElementById("dl-html").onclick =
+        () => downloadFile(randomFilename("html"), html, "text/html");
 
-    document.getElementById("d-svg").onclick = () =>
-        downloadFile(randomFilename("svg"), svgData, "image/svg+xml");
+    document.getElementById("dl-svg").onclick =
+        () => downloadFile(randomFilename("svg"), svg, "image/svg+xml");
 
-    document.getElementById("d-qr").onclick = () =>
-        downloadFile(randomFilename("svg"), qrData, "image/svg+xml");
+    document.getElementById("dl-qr").onclick =
+        () => downloadFile(randomFilename("svg"), qr, "image/svg+xml");
 }
 </script>
 
