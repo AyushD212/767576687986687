@@ -1,47 +1,33 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Redirect Generator</title>
-<style>
-html, body { height: 100%; margin: 0; padding: 0; font-family: Arial, sans-serif; background: #f8f9fa; color: #111; }
-.section { border: 1px solid #e0e0e0; padding: 14px; border-radius: 8px; margin: 18px auto; max-width: 960px; background: #fff; }
-input[type="text"] { width: 72%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-button { padding: 8px 12px; border-radius: 6px; border: 0; background: #0366d6; color: #fff; cursor: pointer; }
-button[disabled] { background: #d1e7fd; cursor: not-allowed; }
-.sample { word-break: break-all; color: #0366d6; text-decoration: none; }
-#spinner { display: none; margin-top: 10px; animation: spin 1s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-</style>
+// Encrypt the payload twice
+async function generateLink() {
+    const dest = document.getElementById('targetInput').value.trim();
+    if (!dest) return alert('Enter a destination URL.');
 
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    // First layer of encryption (AES-GCM)
+    const payload = { u: dest, r: uuid(), t: Date.now() };
+    const encStrLayer1 = await encryptPayload(payload);
+    
+    // Second layer of encryption (AES again or RSA) on the first encrypted string
+    const encStrLayer2 = await encryptPayload({data: encStrLayer1});
 
-<script>
-// ----------------------- CONFIG -----------------------
-const CONFIG = {
-    PUBLIC_HOST: window.location.origin + window.location.pathname,
-    TURNSTILE_SITE_KEY: '0x4AAAAAAB_GRO5x_mAh22NL',   // Your site key
-    TURNSTILE_SECRET:   '0x4AAAAAAB_GRFJDhxRtMixQFQ7ujsuO8e4' // Your secret key
-};
-// ------------------------------------------------------
+    const finalEncrypted = `${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encStrLayer2)}`;
+    
+    // Generate encrypted SVG, HTML, and QR code (with double encryption)
+    const svgEncrypted = generateEncryptedSVG(encStrLayer2);
+    const htmlEncrypted = generateEncryptedHTML(encStrLayer2);
+    const qrSvg = await generateQRCode(finalEncrypted);
 
-function uuid() { return crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2, 12); }
-
-// ----------------------- Base64 helpers -----------------------
-function arrayBufferToBase64(buffer) {
-    let binary = ''; const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-    return btoa(binary);
-}
-function base64ToArrayBuffer(base64) {
-    const binary = atob(base64); const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes.buffer;
+    // Display the generated encrypted outputs
+    document.getElementById('generated').innerHTML = `
+        <div><strong>Encrypted outputs created:</strong></div>
+        <button onclick='downloadFile("encrypted.svg", \`${svgEncrypted}\`, "image/svg+xml")'>Download SVG</button>
+        <button onclick='downloadFile("encrypted.html", \`${htmlEncrypted}\`, "text/html")'>Download HTML</button>
+        <button onclick='downloadFile("encryptedQR.svg", \`${qrSvg}\`, "image/svg+xml")'>Download QR</button>
+        <p style="font-size:13px;color:#666;">All outputs are doubly encrypted for extra security.</p>
+    `;
 }
 
-// ----------------------- AES + HMAC helpers -----------------------
-async function generateAESKey() { return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]); }
+// First layer of encryption (AES-GCM) function (same as before)
 async function encryptPayload(payload) {
     const key = await generateAESKey();
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -50,158 +36,94 @@ async function encryptPayload(payload) {
     const rawKey = await crypto.subtle.exportKey("raw", key);
     return arrayBufferToBase64(encrypted) + '.' + arrayBufferToBase64(iv) + '.' + arrayBufferToBase64(rawKey);
 }
-async function decryptPayload(encStr) {
-    try {
+
+// Function to generate SVG containing double-encrypted data
+function generateEncryptedSVG(encData) {
+    return `
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="120">
+  <rect width="100%" height="100%" fill="#f0f0f0"/>
+  <text x="20" y="60" font-size="16" fill="#666">
+    Double encrypted redirect payload - verification required
+  </text>
+  <metadata>
+    ${encData}  <!-- Encrypted payload is hidden inside metadata -->
+  </metadata>
+</svg>`;
+}
+
+// Function to generate HTML containing double-encrypted data
+function generateEncryptedHTML(encData) {
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Secure Redirect</title>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script>
+const ENCRYPTED = "${encData}";  // Double encrypted payload
+const SITE_KEY = "${CONFIG.TURNSTILE_SITE_KEY}";
+async function base64ToArrayBuffer(base64){
+    const binary=atob(base64);
+    const bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return bytes.buffer;
+}
+async function decryptPayload(encStr){
+    try{
         const [encryptedB64, ivB64, keyB64] = encStr.split('.');
-        const encrypted = base64ToArrayBuffer(encryptedB64);
-        const iv = base64ToArrayBuffer(ivB64);
-        const keyRaw = base64ToArrayBuffer(keyB64);
+        const encrypted = await base64ToArrayBuffer(encryptedB64);
+        const iv = await base64ToArrayBuffer(ivB64);
+        const keyRaw = await base64ToArrayBuffer(keyB64);
         const key = await crypto.subtle.importKey("raw", keyRaw, "AES-GCM", true, ["decrypt"]);
         const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, key, encrypted);
         return JSON.parse(new TextDecoder().decode(decrypted));
-    } catch (e) {
-        console.error("Decryption error:", e);
-        return null;
-    }
+    } catch(e){ return null; }
 }
-
-// ----------------------- DOM events -----------------------
-window.addEventListener('DOMContentLoaded', async () => {
-    const params = new URLSearchParams(location.search);
-    const w = params.get('w');
-    if (!w) { document.getElementById('generator').style.display = 'block'; return; }
-
-    // Show verify screen
-    document.getElementById('verify-screen').style.display = 'flex';
-    const btn = document.getElementById('continueBtn'); let verified = false;
-
-    window.onTurnstileSuccess = function (token) {
-        verified = true;
-        btn.disabled = false;
-        btn.textContent = 'Continue to Redirect';
-    };
-
-    btn.addEventListener('click', async () => {
-        if (!verified) {
-            alert('Please complete the CAPTCHA first.');
-            return;
-        }
-        btn.disabled = true;
-        btn.textContent = 'Redirecting...';
-
-        // Show spinner
-        document.getElementById('spinner').style.display = 'inline-block';
-
-        const payload = await decryptPayload(decodeURIComponent(w));
-        if (!payload || !payload.u) {
-            document.body.innerHTML = '<p style="text-align:center;color:red;">Invalid or malformed link.</p>';
-            return;
-        }
-
-        // Redirect
-        window.location.href = payload.u;
-    });
-});
-
-// ----------------------- Link generator -----------------------
-async function generateLink() {
-    const dest = document.getElementById('targetInput').value.trim();
-    if (!dest) return alert('Please enter a destination URL.');
-    const payload = { u: dest, r: uuid(), t: Date.now() };
-    const encStr = await encryptPayload(payload);
-    const final = `${CONFIG.PUBLIC_HOST}?w=${encodeURIComponent(encStr)}`;
-    document.getElementById('generated').innerHTML = `<div><strong>Encoded link:</strong><br/><a class="sample" href="${final}" target="_blank">${final}</a></div>`;
-
-    // Enable download buttons
-    document.getElementById('downloadHtmlBtn').style.display = 'inline-block';
-    document.getElementById('downloadSvgBtn').style.display = 'inline-block';
-}
-
-// ----------------------- Convert to Encrypted HTML -----------------------
-function downloadHtml() {
-    const link = document.querySelector('.sample').href;
-    const encryptedPayload = encodeURIComponent(link);  // Use the encrypted URL itself
-
-    const htmlContent = `
-        <!DOCTYPE html>
-        <html lang="en">
-        <head><meta charset="utf-8"><title>Redirecting...</title></head>
-        <body>
-            <script>
-                (async () => {
-                    const encStr = "${encryptedPayload}";
-                    const decrypted = await decryptPayload(encStr);
-                    if (decrypted && decrypted.u) {
-                        window.location.href = decrypted.u;
-                    } else {
-                        document.body.innerHTML = "<p style='text-align:center;color:red;'>Invalid or malformed link.</p>";
-                    }
-                })();
-            </script>
-        </body>
-        </html>
-    `;
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'redirect.html';
-    a.click();
-}
-
-// ----------------------- Convert to Encrypted SVG -----------------------
-function downloadSvg() {
-    const link = document.querySelector('.sample').href;
-    const encryptedPayload = encodeURIComponent(link);  // Use the encrypted URL itself
-
-    const svgContent = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
-            <a href="#" onclick="(async () => {
-                const encStr = '${encryptedPayload}';
-                const decrypted = await decryptPayload(encStr);
-                if (decrypted && decrypted.u) {
-                    window.location.href = decrypted.u;
-                } else {
-                    alert('Invalid or malformed link.');
-                }
-            })()">
-                <rect width="200" height="200" fill="#0366d6"/>
-                <text x="100" y="100" font-size="20" text-anchor="middle" fill="white">Click Here</text>
-            </a>
-        </svg>
-    `;
-    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'redirect.svg';
-    a.click();
-}
-
+window.onload = () => {
+  const contBtn = document.getElementById("continueBtn");
+  let verified = false;
+  window.onTurnstileSuccess = function() { verified = true; contBtn.disabled = false; contBtn.textContent = "Continue"; };
+  contBtn.onclick = async () => {
+    if(!verified) return alert("Please complete verification first.");
+    contBtn.disabled = true; contBtn.textContent = "Decrypting...";
+    const payload = await decryptPayload(ENCRYPTED);
+    if (!payload || !payload.data) { document.body.innerHTML = "<p style='color:red;text-align:center;'>Invalid payload</p>"; return; }
+    
+    // Second decryption on the original payload (nested decryption)
+    const secondPayload = await decryptPayload(payload.data);
+    if (!secondPayload || !secondPayload.u) { document.body.innerHTML = "<p style='color:red;text-align:center;'>Decryption failed</p>"; return; }
+    
+    location.href = secondPayload.u;
+  };
+};
 </script>
-
 </head>
-<body>
-
-<!-- Generator section -->
-<div id="generator" class="section" style="display:none;">
-<h2>Generate an encoded redirect link</h2>
-<input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
-<button onclick="generateLink()">Generate</button>
-<div id="generated" style="margin-top:12px;"></div>
-
-<!-- Download buttons -->
-<button id="downloadHtmlBtn" style="display:none;" onclick="downloadHtml()">Download as HTML</button>
-<button id="downloadSvgBtn" style="display:none;" onclick="downloadSvg()">Download as SVG</button>
+<body style="display:flex;align-items:center;justify-content:center;height:100vh;background:#f8f9fa;font-family:sans-serif;">
+<div style="background:#fff;padding:30px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1);text-align:center;">
+  <h2>Verification Required</h2>
+  <div class="cf-turnstile" data-sitekey="${CONFIG.TURNSTILE_SITE_KEY}" data-callback="onTurnstileSuccess"></div>
+  <button id="continueBtn" disabled>Waiting for verification...</button>
 </div>
-
-<!-- Verify screen -->
-<div id="verify-screen">
-<div id="verify-box">
-<h2>Verify to Continue</h2>
-<div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
-<button id="continueBtn" disabled>Waiting for verification...</button>
-<div id="spinner" style="width: 24px; height: 24px; border: 4px solid #f3f3f3; border-top: 4px solid #0366d6; border-radius: 50%;"></div>
-</div>
-</div>
-
 </body>
-</html>
+</html>`;
+}
+
+// Function to generate QR Code (encrypted link)
+function generateQRCode(link) {
+    return new Promise((resolve) => {
+        QRCode.toString(link, { type: 'svg', width: 128 }, (err, svg) => {
+            if (err) console.error('Error generating QR code:', err);
+            resolve(svg);
+        });
+    });
+}
+
+// Helper to download the file
+function downloadFile(filename, content, type) {
+    const blob = new Blob([content], { type });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+}
