@@ -62,7 +62,10 @@ async function decryptPayload(encStr) {
         const key = await crypto.subtle.importKey("raw", keyRaw, "AES-GCM", true, ["decrypt"]);
         const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, key, encrypted);
         return JSON.parse(new TextDecoder().decode(decrypted));
-    } catch (e) { return null; }
+    } catch (e) {
+        console.error("Decryption error:", e);
+        return null;
+    }
 }
 
 // ----------------------- DOM events -----------------------
@@ -175,10 +178,10 @@ function downloadSvg() {
     a.download = 'redirect.svg';
     a.click();
 }
+
 </script>
 
 </head>
-
 <body>
 
 <!-- Generator section -->
@@ -187,12 +190,10 @@ function downloadSvg() {
 <input id="targetInput" type="text" placeholder="Enter destination URL (e.g. https://example.com)" />
 <button onclick="generateLink()">Generate</button>
 <div id="generated" style="margin-top:12px;"></div>
-<div style="margin-top:10px;color:#666;font-size:13px;">All generated links will start with:<br/><code style="word-break:break-all;">${window.location.origin}${window.location.pathname}</code></div>
 
 <!-- Download buttons -->
 <button id="downloadHtmlBtn" style="display:none;" onclick="downloadHtml()">Download as HTML</button>
 <button id="downloadSvgBtn" style="display:none;" onclick="downloadSvg()">Download as SVG</button>
-
 </div>
 
 <!-- Verify screen -->
@@ -201,6 +202,7 @@ function downloadSvg() {
 <h2>Verify to Continue</h2>
 <div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
 <button id="continueBtn" disabled>Waiting for verification...</button>
+<div id="spinner" style="width: 24px; height: 24px; border: 4px solid #f3f3f3; border-top: 4px solid #0366d6; border-radius: 50%;"></div>
 </div>
 </div>
 
