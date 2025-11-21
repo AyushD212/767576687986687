@@ -1,159 +1,94 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Redirect Portal</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Secure Redirect</title>
 
-<!-- Turnstile -->
+<!-- Cloudflare Turnstile -->
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 
 <style>
-body,html{margin:0;padding:0;font-family:Arial;background:#f8f9fa;color:#111}
-.section{background:#fff;padding:18px;margin:20px auto;max-width:900px;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.05)}
-input[type=text]{width:70%;padding:8px;border:1px solid #ccc;border-radius:4px}
-button{padding:8px 12px;background:#0366d6;color:#fff;border:0;border-radius:6px;cursor:pointer}
-.sample{color:#0366d6;word-break:break-all}
-#verify-screen{display:none;align-items:center;justify-content:center;height:100vh}
-#verify-box{background:#fff;padding:30px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.1);text-align:center}
+body,html{margin:0;padding:0;background:#f8f9fa;font-family:Arial}
+.box{background:#fff;max-width:900px;margin:30px auto;padding:20px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+input[type=text]{padding:8px;width:70%;border:1px solid #ccc;border-radius:4px}
+button{padding:8px 12px;border:0;background:#0366d6;color:#fff;border-radius:6px;cursor:pointer}
+a{color:#0366d6;word-break:break-all}
+#verify{display:none;align-items:center;justify-content:center;height:100vh}
+#vBox{background:#fff;padding:30px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.1);text-align:center}
 </style>
 
 <script>
-/* -----------------------------------------
-   CONFIG
------------------------------------------ */
-const CFG = {
-    TURN_KEY: "0x4AAAAAAB_GRO5x_mAh22NL",
-    PUBLIC_HOST: window.location.origin + window.location.pathname
-};
+(()=>{
+const enc = new TextEncoder();
+const dec = new TextDecoder();
 
-/* -----------------------------------------
-   HELPERS
------------------------------------------ */
-const TE = new TextEncoder();
-const TD = new TextDecoder();
+const SITE = window.location.origin + window.location.pathname;
+const TURNSTILE_SITE_KEY = "0x4AAAAAAB_GRO5x_mAh22NL";
 
-function b64(a){return btoa(a);}
-function ub64(a){return atob(a);}
-function ab2b64(buf){
-    let bin="", bytes=new Uint8Array(buf);
-    for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
-    return btoa(bin);
-}
-function b642ab(s){
-    let bin=atob(s), len=bin.length, out=new Uint8Array(len);
-    for(let i=0;i<len;i++) out[i]=bin.charCodeAt(i);
-    return out.buffer;
-}
-function uuid(){
-    return crypto.randomUUID ? crypto.randomUUID() : "id_"+Math.random().toString(36).slice(2,12);
-}
+/* ---------------- AES helpers ---------------- */
+async function genKey(){ return crypto.subtle.generateKey({name:"AES-GCM",length:256},true,["encrypt","decrypt"]); }
+function b64(a){ return btoa(String.fromCharCode(...new Uint8Array(a))); }
+function b64ToA(b){ return Uint8Array.from(atob(b),c=>c.charCodeAt(0)); }
 
-/* -----------------------------------------
-   AES FUNCTIONS
------------------------------------------ */
-async function genAES(){return crypto.subtle.generateKey({name:"AES-GCM",length:256},true,["encrypt","decrypt"]);}
-
+/* --------- Encrypt full payload -------- */
 async function encryptPayload(obj){
-    obj._pad = Array.from({length:16},()=>Math.floor(Math.random()*256));
+    obj.pad = crypto.getRandomValues(new Uint8Array(16));
+    obj.noise = Math.random().toString(36).slice(2);
+    obj.domain = location.hostname;
+    obj.ts = Date.now();
 
-    const k1 = await genAES();
+    const k1 = await genKey();
     const iv1 = crypto.getRandomValues(new Uint8Array(12));
-    const enc1 = await crypto.subtle.encrypt({name:"AES-GCM",iv:iv1},k1,TE.encode(JSON.stringify(obj)));
-    const k1raw = await crypto.subtle.exportKey("raw",k1);
+    const e1 = await crypto.subtle.encrypt({name:"AES-GCM",iv:iv1},k1,enc.encode(JSON.stringify(obj)));
+    const rk1 = await crypto.subtle.exportKey("raw",k1);
 
-    const k2 = await genAES();
+    const k2 = await genKey();
     const iv2 = crypto.getRandomValues(new Uint8Array(12));
-    const enc2 = await crypto.subtle.encrypt({name:"AES-GCM",iv:iv2},k2,enc1);
-    const k2raw = await crypto.subtle.exportKey("raw",k2);
+    const e2 = await crypto.subtle.encrypt({name:"AES-GCM",iv:iv2},k2,e1);
+    const rk2 = await crypto.subtle.exportKey("raw",k2);
 
-    const pack = [
-        ab2b64(enc2),
-        ab2b64(iv2),
-        ab2b64(k2raw),
-        ab2b64(iv1),
-        ab2b64(k1raw)
-    ].map(s=>b64(s)).join(".");
-
-    return pack;
+    return [
+        btoa(b64(e2)),
+        btoa(b64(iv2)),
+        btoa(b64(rk2)),
+        btoa(b64(iv1)),
+        btoa(b64(rk1))
+    ].join(".");
 }
 
+/* --------- Decrypt full payload -------- */
 async function decryptPayload(str){
     try{
-        let p = str.split(".").map(s=>ub64(s));
-        let [e2b,iv2b,k2b,iv1b,k1b] = p;
+        let p = str.split(".").map(x=>atob(x));
+        let [sE2,sIV2,sK2,sIV1,sK1] = p;
 
-        const k2raw = b642ab(k2b);
-        const k2 = await crypto.subtle.importKey("raw",k2raw,"AES-GCM",true,["decrypt"]);
-        const e2 = b642ab(e2b);
-        const iv2 = b642ab(iv2b);
-        const e1 = await crypto.subtle.decrypt({name:"AES-GCM",iv:iv2},k2,e2);
+        let K2 = await crypto.subtle.importKey("raw",b64ToA(sK2),"AES-GCM",true,["decrypt"]);
+        let inner = await crypto.subtle.decrypt({name:"AES-GCM",iv:b64ToA(sIV2)},K2,b64ToA(sE2));
 
-        const k1raw = b642ab(k1b);
-        const k1 = await crypto.subtle.importKey("raw",k1raw,"AES-GCM",true,["decrypt"]);
-        const iv1 = b642ab(iv1b);
-        const final = await crypto.subtle.decrypt({name:"AES-GCM",iv:iv1},k1,e1);
+        let K1 = await crypto.subtle.importKey("raw",b64ToA(sK1),"AES-GCM",true,["decrypt"]);
+        let plain = await crypto.subtle.decrypt({name:"AES-GCM",iv:b64ToA(sIV1)},K1,inner);
 
-        return JSON.parse(TD.decode(final));
-    }catch(e){
+        return JSON.parse(dec.decode(plain));
+    } catch(e){
         return null;
     }
 }
 
-/* -----------------------------------------
-   DEVTOOLS DETECTION — SAFE VERSION
------------------------------------------ */
-let devtoolsOpen = false;
+/* ---------- Light Bot Checks (Safe) ---------- */
+function humanCheck(){
+    return new Promise(res=>{
+        let ok = false;
+        let t0 = performance.now();
 
-function checkDevTools(){
-    const threshold = 180;
-    const w = window.outerWidth - window.innerWidth;
-    const h = window.outerHeight - window.innerHeight;
-    devtoolsOpen = (w > threshold) || (h > threshold);
+        window.addEventListener("mousemove",()=>ok=true,{once:true});
+        window.addEventListener("touchstart",()=>ok=true,{once:true});
 
-    if(devtoolsOpen){
-        document.body.innerHTML = `
-            <div style="text-align:center;margin-top:20%;">
-                <h1 style="color:red;">ACCESS DENIED</h1>
-                <p>Developer Tools detected. Close DevTools to continue.</p>
-            </div>`;
-    }
+        setTimeout(()=>res(ok || performance.now()-t0>120),150);
+    });
 }
 
-setInterval(checkDevTools, 800);
-window.addEventListener("resize", checkDevTools);
-
-/* -----------------------------------------
-   PAGE TITLES
------------------------------------------ */
-const titles = ["Hidden Path","Mystery Gate","Secret Trail","Obscured Portal","Shadow Route"];
-document.title = titles[Math.floor(Math.random()*titles.length)];
-
-/* -----------------------------------------
-   GENERATE LINK
------------------------------------------ */
-async function generateLink(){
-    const d = document.getElementById("target").value.trim();
-    if(!d) return alert("Enter a destination URL.");
-
-    const payload = {
-        u: d,
-        r: uuid(),
-        n: Math.random().toString(36).slice(2,10),
-        t: Date.now()
-    };
-
-    const enc = await encryptPayload(payload);
-    const final = `${CFG.PUBLIC_HOST}?w=${encodeURIComponent(enc)}`;
-
-    document.getElementById("output").innerHTML =
-        `<p><strong>Generated:</strong><br>
-         <a class="sample" href="${final}" target="_blank">${final}</a></p>`;
-}
-
-/* -----------------------------------------
-   REDIRECT LOGIC
------------------------------------------ */
+/* ---------------- Page Logic ---------------- */
 window.addEventListener("DOMContentLoaded",()=>{
     const params = new URLSearchParams(location.search);
     const w = params.get("w");
@@ -163,55 +98,62 @@ window.addEventListener("DOMContentLoaded",()=>{
         return;
     }
 
-    document.getElementById("verify-screen").style.display="flex";
+    document.getElementById("verify").style.display="flex";
 
-    let ok = false;
-    window.onTurnstileSuccess = function(){ ok = true; document.getElementById("go").disabled=false; };
+    let verified = false;
+    window.onTurnstileSuccess = ()=>{ verified = true; document.getElementById("go").disabled=false; };
 
-    document.getElementById("go").addEventListener("click", async ()=>{
-        if(devtoolsOpen) return;
-        if(!ok){ alert("Please complete verification."); return; }
-
-        document.getElementById("go").disabled = true;
+    document.getElementById("go").onclick = async ()=>{
+        if(!verified) return alert("Please verify first.");
         document.getElementById("go").textContent = "Checking...";
 
-        const p = await decryptPayload(decodeURIComponent(w));
-        if(!p || !p.u){
-            document.body.innerHTML =
-                "<h1 style='text-align:center;margin-top:20%;color:red;'>Invalid Link</h1>";
+        if(!await humanCheck()) return alert("Bot behavior detected.");
+
+        let payload = await decryptPayload(decodeURIComponent(w));
+        if(!payload || !payload.u || payload.domain !== location.hostname){
+            document.body.innerHTML="<h1 style='text-align:center;margin-top:20%;color:red;'>Invalid Link</h1>";
             return;
         }
 
-        await new Promise(res=>setTimeout(res, 600 + Math.random()*500));
-        if(devtoolsOpen) return;
+        await new Promise(r=>setTimeout(r(300 + Math.random()*700)));
 
-        window.location.href = p.u;
-    });
+        location.href = payload.u;
+    };
 });
+
+/* ---------------- Generator ---------------- */
+window.makeLink = async ()=>{
+    const u = document.getElementById("url").value.trim();
+    if(!u) return alert("Enter URL.");
+
+    const payload = { u, nonce:crypto.randomUUID() };
+    const enc = await encryptPayload(payload);
+
+    const link = `${SITE}?w=${encodeURIComponent(enc)}`;
+    document.getElementById("out").innerHTML =
+        `<p><strong>Generated:</strong><br><a href="${link}" target="_blank">${link}</a></p>`;
+};
+})();
 </script>
 </head>
 
 <body>
 
 <!-- Generator -->
-<div id="gen" class="section" style="display:none;">
-    <h2>Generate Secure Redirect</h2>
-    <input id="target" type="text" placeholder="Enter URL (e.g. https://example.com)">
-    <button onclick="generateLink()">Generate</button>
-    <div id="output" style="margin-top:15px;"></div>
-    <p style="font-size:12px;color:#666;">Links start with:<br>
-    <code>${window.location.origin}${window.location.pathname}</code></p>
+<div id="gen" class="box" style="display:none;">
+    <h2>Create Protected Redirect</h2>
+    <input id="url" type="text" placeholder="https://example.com">
+    <button onclick="makeLink()">Generate</button>
+    <div id="out" style="margin-top:15px;"></div>
 </div>
 
-<!-- Redirect Screen -->
-<div id="verify-screen">
-    <div id="verify-box">
-        <h2>Verify to Continue</h2>
-        <div class="cf-turnstile"
-             data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL"
-             data-callback="onTurnstileSuccess"></div>
-        <button id="go" disabled>Waiting...</button>
-    </div>
+<!-- Verify Page -->
+<div id="verify">
+<div id="vBox">
+<h2>Verify to Continue</h2>
+<div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
+<button id="go" disabled>Waiting...</button>
+</div>
 </div>
 
 </body>
