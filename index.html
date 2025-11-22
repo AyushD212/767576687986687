@@ -19,122 +19,128 @@ a{color:#0366d6;word-break:break-all}
 </style>
 
 <script>
-(()=>{
-const enc = new TextEncoder();
-const dec = new TextDecoder();
+(() => {
 
-const SITE = window.location.origin + window.location.pathname;
-const TURNSTILE_SITE_KEY = "0x4AAAAAAB_GRO5x_mAh22NL";
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
-/* ---------------- AES helpers ---------------- */
-async function genKey(){ return crypto.subtle.generateKey({name:"AES-GCM",length:256},true,["encrypt","decrypt"]); }
-function b64(a){ return btoa(String.fromCharCode(...new Uint8Array(a))); }
-function b64ToA(b){ return Uint8Array.from(atob(b),c=>c.charCodeAt(0)); }
+/* ---------------- Trusted Domains ---------------- */
+const TRUSTED_DOMAINS = [
+    "yourdomain.com",
+    "anotherdomain.net"
+];
 
-/* --------- Encrypt full payload -------- */
-async function encryptPayload(obj){
-    obj.pad = crypto.getRandomValues(new Uint8Array(16));
-    obj.noise = Math.random().toString(36).slice(2);
-    obj.domain = location.hostname;
-    obj.ts = Date.now();
-
-    const k1 = await genKey();
-    const iv1 = crypto.getRandomValues(new Uint8Array(12));
-    const e1 = await crypto.subtle.encrypt({name:"AES-GCM",iv:iv1},k1,enc.encode(JSON.stringify(obj)));
-    const rk1 = await crypto.subtle.exportKey("raw",k1);
-
-    const k2 = await genKey();
-    const iv2 = crypto.getRandomValues(new Uint8Array(12));
-    const e2 = await crypto.subtle.encrypt({name:"AES-GCM",iv:iv2},k2,e1);
-    const rk2 = await crypto.subtle.exportKey("raw",k2);
-
-    return [
-        btoa(b64(e2)),
-        btoa(b64(iv2)),
-        btoa(b64(rk2)),
-        btoa(b64(iv1)),
-        btoa(b64(rk1))
-    ].join(".");
+/* ----------- SHA‑256 integrity hash ------------ */
+async function sha256(str){
+    const data = encoder.encode(str);
+    const hash = await crypto.subtle.digest("SHA-256", data);
+    return btoa(String.fromCharCode(...new Uint8Array(hash)));
 }
 
-/* --------- Decrypt full payload -------- */
-async function decryptPayload(str){
-    try{
-        let p = str.split(".").map(x=>atob(x));
-        let [sE2,sIV2,sK2,sIV1,sK1] = p;
-
-        let K2 = await crypto.subtle.importKey("raw",b64ToA(sK2),"AES-GCM",true,["decrypt"]);
-        let inner = await crypto.subtle.decrypt({name:"AES-GCM",iv:b64ToA(sIV2)},K2,b64ToA(sE2));
-
-        let K1 = await crypto.subtle.importKey("raw",b64ToA(sK1),"AES-GCM",true,["decrypt"]);
-        let plain = await crypto.subtle.decrypt({name:"AES-GCM",iv:b64ToA(sIV1)},K1,inner);
-
-        return JSON.parse(dec.decode(plain));
-    } catch(e){
-        return null;
-    }
+/* ----------- Random Query Param Name ----------- */
+function randomParam(){
+    return crypto.randomUUID().replace(/-/g,"").slice(0,10);
 }
 
-/* ---------- Light Bot Checks (Safe) ---------- */
-function humanCheck(){
-    return new Promise(res=>{
-        let ok = false;
-        let t0 = performance.now();
+/* ----------- Generator Logic ----------- */
+window.makeLink = async () => {
+    const target = document.getElementById("url").value.trim();
+    if(!target) return alert("Enter URL.");
 
-        window.addEventListener("mousemove",()=>ok=true,{once:true});
-        window.addEventListener("touchstart",()=>ok=true,{once:true});
-
-        setTimeout(()=>res(ok || performance.now()-t0>120),150);
+    // Payload is NOT hidden — only preserved
+    const payload = JSON.stringify({
+        u: target,
+        d: TRUSTED_DOMAINS,
+        ts: Date.now()
     });
+
+    const checksum = await sha256(payload);
+
+    const param = randomParam();
+    const SITE = window.location.origin + window.location.pathname;
+
+    const url = `${SITE}?${param}=${encodeURIComponent(btoa(payload))}&sig=${checksum}`;
+
+    document.getElementById("out").innerHTML =
+        `<p><strong>Generated:</strong><br><a href="${url}" target="_blank">${url}</a></p>`;
+};
+
+/* --------- Validate & Redirect -------- */
+async function validateAndRedirect(payload, sig){
+
+    const computed = await sha256(payload);
+    if(computed !== sig) return false;
+
+    const obj = JSON.parse(atob(payload));
+
+    if(!obj.u) return false;
+
+    // domain whitelist check
+    let ok = false;
+    for(const d of obj.d){
+        if(location.hostname.includes(d)){
+            ok = true;
+            break;
+        }
+    }
+    if(!ok) return false;
+
+    // micro-interaction check (allowed)
+    let human = false;
+    const t0 = performance.now();
+    window.addEventListener("mousemove", () => human = true, {once:true});
+    await new Promise(r => setTimeout(r,150));
+
+    if(!human && performance.now() - t0 < 120) return false;
+
+    return obj.u;
 }
 
-/* ---------------- Page Logic ---------------- */
-window.addEventListener("DOMContentLoaded",()=>{
-    const params = new URLSearchParams(location.search);
-    const w = params.get("w");
+/* ----------- Page Init ----------- */
+window.addEventListener("DOMContentLoaded", async () => {
 
-    if(!w){
-        document.getElementById("gen").style.display="block";
+    const params = new URLSearchParams(location.search);
+    if(params.toString() === ""){
+        document.getElementById("gen").style.display = "block";
         return;
     }
 
-    document.getElementById("verify").style.display="flex";
+    document.getElementById("verify").style.display = "flex";
 
     let verified = false;
-    window.onTurnstileSuccess = ()=>{ verified = true; document.getElementById("go").disabled=false; };
+    window.onTurnstileSuccess = () => {
+        verified = true;
+        document.getElementById("go").disabled = false;
+    };
 
-    document.getElementById("go").onclick = async ()=>{
+    document.getElementById("go").onclick = async () => {
         if(!verified) return alert("Please verify first.");
-        document.getElementById("go").textContent = "Checking...";
 
-        if(!await humanCheck()) return alert("Bot behavior detected.");
+        const entries = [...params.entries()];
+        const sig = params.get("sig");
 
-        let payload = await decryptPayload(decodeURIComponent(w));
-        if(!payload || !payload.u || payload.domain !== location.hostname){
-            document.body.innerHTML="<h1 style='text-align:center;margin-top:20%;color:red;'>Invalid Link</h1>";
+        // find the *random* param
+        const [key, val] = entries.find(e => e[0] !== "sig");
+
+        const target = await validateAndRedirect(val, sig);
+
+        if(!target){
+            document.body.innerHTML =
+                "<h1 style='text-align:center;margin-top:20%;color:red;'>Invalid Link</h1>";
             return;
         }
 
-        await new Promise(r=>setTimeout(r(300 + Math.random()*700)));
+        // small human-like delay
+        await new Promise(r => setTimeout(r, 300 + Math.random()*400));
 
-        location.href = payload.u;
+        location.href = target;
     };
+
 });
 
-/* ---------------- Generator ---------------- */
-window.makeLink = async ()=>{
-    const u = document.getElementById("url").value.trim();
-    if(!u) return alert("Enter URL.");
-
-    const payload = { u, nonce:crypto.randomUUID() };
-    const enc = await encryptPayload(payload);
-
-    const link = `${SITE}?w=${encodeURIComponent(enc)}`;
-    document.getElementById("out").innerHTML =
-        `<p><strong>Generated:</strong><br><a href="${link}" target="_blank">${link}</a></p>`;
-};
 })();
 </script>
+
 </head>
 
 <body>
@@ -147,13 +153,14 @@ window.makeLink = async ()=>{
     <div id="out" style="margin-top:15px;"></div>
 </div>
 
-<!-- Verify Page -->
+<!-- Verification Page -->
 <div id="verify">
-<div id="vBox">
-<h2>Verify to Continue</h2>
-<div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL" data-callback="onTurnstileSuccess"></div>
-<button id="go" disabled>Waiting...</button>
-</div>
+    <div id="vBox">
+        <h2>Verify to Continue</h2>
+        <div class="cf-turnstile" data-sitekey="0x4AAAAAAB_GRO5x_mAh22NL"
+             data-callback="onTurnstileSuccess"></div>
+        <button id="go" disabled>Waiting...</button>
+    </div>
 </div>
 
 </body>
